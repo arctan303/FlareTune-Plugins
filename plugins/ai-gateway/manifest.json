@@ -1,0 +1,124 @@
+{
+  "id": "ai-gateway",
+  "version": "0.1.0",
+  "hostApiVersion": 2,
+  "apiVersion": 1,
+  "dataVersion": 0,
+  "name": "AI 网关",
+  "description": "AI 渠道、模型、协议和密钥管理，为已安装的 AI 插件提供调用能力。",
+  "icon": "settings",
+  "supportedLocales": [
+    "zh",
+    "zh-Hant",
+    "en",
+    "ja",
+    "ko"
+  ],
+  "defaultLocale": "en",
+  "metadata": {
+    "zh": {
+      "name": "AI 网关",
+      "description": "AI 渠道、模型、协议和密钥管理，为已安装的 AI 插件提供调用能力。"
+    },
+    "zh-Hant": {
+      "name": "AI 閘道",
+      "description": "管理 AI 渠道、模型、協定與金鑰，供已安裝的 AI 外掛呼叫。"
+    },
+    "en": {
+      "name": "AI gateway",
+      "description": "Manage AI providers, models, protocols and credentials for installed AI plugins."
+    },
+    "ja": {
+      "name": "AI ゲートウェイ",
+      "description": "AI プロバイダー、モデル、プロトコルと認証情報を管理し、インストール済みの AI プラグインに提供します。"
+    },
+    "ko": {
+      "name": "AI 게이트웨이",
+      "description": "설치된 AI 플러그인에 사용할 공급자, 모델, 프로토콜 및 인증 정보를 관리합니다."
+    }
+  },
+  "messages": {
+    "zh": {
+      "gateway": "AI 网关",
+      "assistant": "助手",
+      "lyrics": "歌词工作台",
+      "configuration": "设置",
+      "conversation": "对话",
+      "memory": "记忆",
+      "current": "当前歌词",
+      "tools": "文件与管理",
+      "candidates": "候选歌词",
+      "clear": "清空对话",
+      "name": "AI 网关"
+    },
+    "zh-Hant": {
+      "gateway": "AI 閘道",
+      "assistant": "助手",
+      "lyrics": "歌詞工作台",
+      "configuration": "設定",
+      "conversation": "對話",
+      "memory": "記憶",
+      "current": "目前歌詞",
+      "tools": "檔案與管理",
+      "candidates": "候選歌詞",
+      "clear": "清空對話",
+      "name": "AI 閘道"
+    },
+    "en": {
+      "gateway": "AI gateway",
+      "assistant": "Assistant",
+      "lyrics": "Lyrics workspace",
+      "configuration": "Settings",
+      "conversation": "Conversation",
+      "memory": "Memory",
+      "current": "Current lyrics",
+      "tools": "Files and management",
+      "candidates": "Lyric candidates",
+      "clear": "Clear conversation",
+      "name": "AI gateway"
+    },
+    "ja": {
+      "gateway": "AI ゲートウェイ",
+      "assistant": "アシスタント",
+      "lyrics": "歌詞ワークスペース",
+      "configuration": "設定",
+      "conversation": "会話",
+      "memory": "メモリ",
+      "current": "現在の歌詞",
+      "tools": "ファイルと管理",
+      "candidates": "歌詞候補",
+      "clear": "会話を消去",
+      "name": "AI ゲートウェイ"
+    },
+    "ko": {
+      "gateway": "AI 게이트웨이",
+      "assistant": "어시스턴트",
+      "lyrics": "가사 작업 공간",
+      "configuration": "설정",
+      "conversation": "대화",
+      "memory": "메모리",
+      "current": "현재 가사",
+      "tools": "파일 및 관리",
+      "candidates": "가사 후보",
+      "clear": "대화 지우기",
+      "name": "AI 게이트웨이"
+    }
+  },
+  "capabilityRoles": [
+    "admin"
+  ],
+  "pages": [
+    {
+      "id": "configuration",
+      "kind": "settings",
+      "scope": "instance",
+      "roles": [
+        "admin"
+      ],
+      "label": "设置",
+      "labelKey": "configuration",
+      "icon": "settings"
+    }
+  ],
+  "entries": []
+}

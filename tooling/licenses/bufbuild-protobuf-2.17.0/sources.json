@@ -1,0 +1,21 @@
+{
+  "package": "@bufbuild/protobuf",
+  "version": "2.17.0",
+  "license": "(Apache-2.0 AND BSD-3-Clause)",
+  "reason": "The published npm package omits standalone license files. These reviewed copies preserve both declared licenses without network access during packaging.",
+  "sources": [
+    {
+      "file": "LICENSE-APACHE.txt",
+      "url": "https://github.com/bufbuild/protobuf-es/blob/v2.17.0/LICENSE",
+      "gitBlobSha1": "0852eae3adf81df4a705737ec733a408a3e9ddc0",
+      "sha256": "c04b4216f1cd4c5a4f7fb2f2a1b0ae70d847e9e0cac7c9dee9bf8cc03177c449"
+    },
+    {
+      "file": "LICENSE-BSD.txt",
+      "url": "https://github.com/bufbuild/protobuf-es/blob/v2.17.0/packages/protobuf/src/wire/varint.ts",
+      "npmSource": "@bufbuild/protobuf@2.17.0/dist/esm/wire/varint.js",
+      "npmSourceSha256": "5a78ffe702716989b7c1d5f5deb73f7283655af5a7ecb3d885ae0b19f59eeaeb",
+      "sha256": "182a1bc8985a586e8e0ca3b5a3af1ff3c28bd3475833a07f50b42b53dd7ac889"
+    }
+  ]
+}

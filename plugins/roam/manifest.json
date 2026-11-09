@@ -1,0 +1,93 @@
+{
+  "id": "roam",
+  "version": "0.1.0",
+  "hostApiVersion": 2,
+  "apiVersion": 1,
+  "dataVersion": 0,
+  "name": "漫游",
+  "description": "按语种探索音乐，为播放队列持续补充歌曲。",
+  "icon": "shuffle",
+  "supportedLocales": [
+    "zh",
+    "zh-Hant",
+    "en",
+    "ja",
+    "ko"
+  ],
+  "defaultLocale": "en",
+  "capabilityRoles": [
+    "admin",
+    "member"
+  ],
+  "metadata": {
+    "zh": {
+      "name": "漫游",
+      "description": "按语种探索音乐，为播放队列持续补充歌曲。"
+    },
+    "zh-Hant": {
+      "name": "漫遊",
+      "description": "依語種探索音樂，持續為播放佇列補充歌曲。"
+    },
+    "en": {
+      "name": "Roam",
+      "description": "Explore music by language and keep adding songs to the playback queue."
+    },
+    "ja": {
+      "name": "ローミング",
+      "description": "言語ごとに音楽を探し、再生キューに曲を追加します。"
+    },
+    "ko": {
+      "name": "로밍",
+      "description": "언어별로 음악을 탐색하고 재생 대기열에 곡을 계속 추가합니다."
+    }
+  },
+  "messages": {
+    "zh": {
+      "name": "漫游"
+    },
+    "zh-Hant": {
+      "name": "漫遊"
+    },
+    "en": {
+      "name": "Roam"
+    },
+    "ja": {
+      "name": "ローミング"
+    },
+    "ko": {
+      "name": "로밍"
+    }
+  },
+  "capabilities": {
+    "queueContinuation": true
+  },
+  "pages": [
+    {
+      "id": "browse",
+      "kind": "service",
+      "roles": [
+        "admin",
+        "member"
+      ],
+      "label": "漫游",
+      "labelKey": "name",
+      "icon": "shuffle",
+      "playerPlacement": "inherit"
+    }
+  ],
+  "entries": [
+    {
+      "id": "open-roam",
+      "slot": "sidebar.primary",
+      "page": "browse",
+      "roles": [
+        "admin",
+        "member"
+      ],
+      "label": "漫游",
+      "labelKey": "name",
+      "icon": "shuffle",
+      "order": 30
+    }
+  ]
+}

@@ -1,0 +1,215 @@
+{
+  "id": "lyrics-workbench",
+  "version": "0.1.0",
+  "hostApiVersion": 2,
+  "apiVersion": 1,
+  "dataVersion": 0,
+  "name": "歌词工作台",
+  "description": "查看、选择和编辑歌词；安装 AI 网关后可使用 AI 辅助功能。",
+  "icon": "lyrics",
+  "supportedLocales": [
+    "zh",
+    "zh-Hant",
+    "en",
+    "ja",
+    "ko"
+  ],
+  "defaultLocale": "en",
+  "metadata": {
+    "zh": {
+      "name": "歌词工作台",
+      "description": "查看、选择和编辑歌词；安装 AI 网关后可使用 AI 辅助功能。"
+    },
+    "zh-Hant": {
+      "name": "歌詞工作台",
+      "description": "檢視、選擇和編輯歌詞；安裝 AI 閘道後可使用 AI 輔助功能。"
+    },
+    "en": {
+      "name": "Lyrics workspace",
+      "description": "View, choose and edit lyrics, with optional AI assistance through the AI gateway."
+    },
+    "ja": {
+      "name": "歌詞ワークスペース",
+      "description": "歌詞を表示、選択、編集します。AI ゲートウェイをインストールすると AI 支援も使えます。"
+    },
+    "ko": {
+      "name": "가사 작업 공간",
+      "description": "가사를 보고 선택하고 편집합니다. AI 게이트웨이를 설치하면 AI 보조 기능도 사용할 수 있습니다."
+    }
+  },
+  "messages": {
+    "zh": {
+      "gateway": "AI 网关",
+      "assistant": "助手",
+      "lyrics": "歌词工作台",
+      "configuration": "设置",
+      "conversation": "对话",
+      "memory": "记忆",
+      "current": "当前歌词",
+      "tools": "文件与管理",
+      "candidates": "候选歌词",
+      "clear": "清空对话",
+      "name": "歌词工作台"
+    },
+    "zh-Hant": {
+      "gateway": "AI 閘道",
+      "assistant": "助手",
+      "lyrics": "歌詞工作台",
+      "configuration": "設定",
+      "conversation": "對話",
+      "memory": "記憶",
+      "current": "目前歌詞",
+      "tools": "檔案與管理",
+      "candidates": "候選歌詞",
+      "clear": "清空對話",
+      "name": "歌詞工作台"
+    },
+    "en": {
+      "gateway": "AI gateway",
+      "assistant": "Assistant",
+      "lyrics": "Lyrics workspace",
+      "configuration": "Settings",
+      "conversation": "Conversation",
+      "memory": "Memory",
+      "current": "Current lyrics",
+      "tools": "Files and management",
+      "candidates": "Lyric candidates",
+      "clear": "Clear conversation",
+      "name": "Lyrics workspace"
+    },
+    "ja": {
+      "gateway": "AI ゲートウェイ",
+      "assistant": "アシスタント",
+      "lyrics": "歌詞ワークスペース",
+      "configuration": "設定",
+      "conversation": "会話",
+      "memory": "メモリ",
+      "current": "現在の歌詞",
+      "tools": "ファイルと管理",
+      "candidates": "歌詞候補",
+      "clear": "会話を消去",
+      "name": "歌詞ワークスペース"
+    },
+    "ko": {
+      "gateway": "AI 게이트웨이",
+      "assistant": "어시스턴트",
+      "lyrics": "가사 작업 공간",
+      "configuration": "설정",
+      "conversation": "대화",
+      "memory": "메모리",
+      "current": "현재 가사",
+      "tools": "파일 및 관리",
+      "candidates": "가사 후보",
+      "clear": "대화 지우기",
+      "name": "가사 작업 공간"
+    }
+  },
+  "capabilityRoles": [
+    "admin",
+    "member"
+  ],
+  "optionalDependencies": {
+    "ai-gateway": {
+      "apiVersion": 1,
+      "features": [
+        "ai"
+      ]
+    }
+  },
+  "pages": [
+    {
+      "id": "current",
+      "kind": "service",
+      "roles": [
+        "admin",
+        "member"
+      ],
+      "label": "当前歌词",
+      "labelKey": "current",
+      "icon": "lyrics",
+      "group": "lyrics",
+      "playerPlacement": "sidebar"
+    },
+    {
+      "id": "tools",
+      "kind": "service",
+      "roles": [
+        "admin",
+        "member"
+      ],
+      "label": "文件与管理",
+      "labelKey": "tools",
+      "icon": "lyrics",
+      "group": "lyrics",
+      "playerPlacement": "sidebar"
+    },
+    {
+      "id": "candidates",
+      "kind": "service",
+      "roles": [
+        "admin",
+        "member"
+      ],
+      "label": "候选歌词",
+      "labelKey": "candidates",
+      "icon": "lyrics",
+      "group": "lyrics",
+      "playerPlacement": "sidebar"
+    },
+    {
+      "id": "configuration",
+      "kind": "settings",
+      "scope": "instance",
+      "roles": [
+        "admin"
+      ],
+      "label": "设置",
+      "labelKey": "configuration",
+      "icon": "settings"
+    }
+  ],
+  "entries": [
+    {
+      "id": "current",
+      "slot": "sidebar.secondary",
+      "page": "current",
+      "roles": [
+        "admin",
+        "member"
+      ],
+      "label": "当前歌词",
+      "labelKey": "current",
+      "icon": "lyrics",
+      "group": "lyrics",
+      "order": 10
+    },
+    {
+      "id": "tools",
+      "slot": "sidebar.secondary",
+      "page": "tools",
+      "roles": [
+        "admin",
+        "member"
+      ],
+      "label": "文件与管理",
+      "labelKey": "tools",
+      "icon": "lyrics",
+      "group": "lyrics",
+      "order": 11
+    },
+    {
+      "id": "candidates",
+      "slot": "sidebar.secondary",
+      "page": "candidates",
+      "roles": [
+        "admin",
+        "member"
+      ],
+      "label": "候选歌词",
+      "labelKey": "candidates",
+      "icon": "lyrics",
+      "group": "lyrics",
+      "order": 12
+    }
+  ]
+}

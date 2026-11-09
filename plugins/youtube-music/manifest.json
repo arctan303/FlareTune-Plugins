@@ -1,0 +1,98 @@
+{
+  "id": "youtube-music",
+  "version": "0.1.0",
+  "hostApiVersion": 2,
+  "apiVersion": 1,
+  "dataVersion": 0,
+  "name": "YouTube Music",
+  "description": "连接一个站点 YouTube 账号，为现有搜索和播放器提供音乐源。",
+  "icon": "music",
+  "supportedLocales": [
+    "zh",
+    "zh-Hant",
+    "en",
+    "ja",
+    "ko"
+  ],
+  "defaultLocale": "en",
+  "capabilityRoles": [
+    "admin",
+    "member"
+  ],
+  "metadata": {
+    "zh": {
+      "name": "YouTube Music",
+      "description": "连接一个站点 YouTube 账号，为现有搜索和播放器提供音乐源。"
+    },
+    "zh-Hant": {
+      "name": "YouTube Music",
+      "description": "連接一個站點 YouTube 帳號，為現有搜尋與播放器提供音樂來源。"
+    },
+    "en": {
+      "name": "YouTube Music",
+      "description": "Connect a site YouTube account to add a music source to search and the player."
+    },
+    "ja": {
+      "name": "YouTube Music",
+      "description": "サイト用のYouTubeアカウントを接続し、検索とプレーヤーに音楽ソースを追加します。"
+    },
+    "ko": {
+      "name": "YouTube Music",
+      "description": "사이트 YouTube 계정을 연결하여 검색과 플레이어에 음악 소스를 추가합니다."
+    }
+  },
+  "messages": {
+    "zh": {
+      "connection": "账号连接",
+      "name": "YouTube Music"
+    },
+    "zh-Hant": {
+      "connection": "帳號連接",
+      "name": "YouTube Music"
+    },
+    "en": {
+      "connection": "Account connection",
+      "name": "YouTube Music"
+    },
+    "ja": {
+      "connection": "アカウント接続",
+      "name": "YouTube Music"
+    },
+    "ko": {
+      "connection": "계정 연결",
+      "name": "YouTube Music"
+    }
+  },
+  "capabilities": {
+    "search": true,
+    "songs": true,
+    "artists": true,
+    "albums": true,
+    "stream": true,
+    "lyrics": true
+  },
+  "pages": [
+    {
+      "id": "connection",
+      "kind": "settings",
+      "access": "admin",
+      "scope": "instance",
+      "playerPlacement": "inherit",
+      "label": "账号连接",
+      "labelKey": "connection",
+      "icon": "link"
+    }
+  ],
+  "entries": [
+    {
+      "id": "connection-settings",
+      "slot": "sidebar.settings.admin",
+      "page": "connection",
+      "label": "YouTube Music",
+      "labelKey": "name",
+      "icon": "music",
+      "order": 65,
+      "access": "admin"
+    }
+  ]
+}

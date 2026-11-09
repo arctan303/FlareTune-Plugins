@@ -1,0 +1,155 @@
+{
+  "id": "xiaomi-speaker",
+  "version": "1.1.0",
+  "hostApiVersion": 2,
+  "apiVersion": 1,
+  "name": "小米音箱",
+  "description": "连接本人的小米账号，将网页播放器输出到小爱音箱。",
+  "icon": "speaker",
+  "supportedLocales": [
+    "zh",
+    "zh-Hant",
+    "en",
+    "ja",
+    "ko"
+  ],
+  "defaultLocale": "en",
+  "metadata": {
+    "zh": {
+      "name": "小米音箱",
+      "description": "连接本人的小米账号，将网页播放器输出到小爱音箱。"
+    },
+    "zh-Hant": {
+      "name": "小米音箱",
+      "description": "連接自己的小米帳號，將網頁播放器輸出到小愛音箱。"
+    },
+    "en": {
+      "name": "Xiaomi speakers",
+      "description": "Connect your Xiaomi account to play web player audio on a XiaoAI speaker."
+    },
+    "ja": {
+      "name": "Xiaomi スピーカー",
+      "description": "自分のXiaomiアカウントを接続し、ウェブプレーヤーの音声をXiaoAIスピーカーで再生します。"
+    },
+    "ko": {
+      "name": "Xiaomi 스피커",
+      "description": "본인의 Xiaomi 계정을 연결하여 웹 플레이어 오디오를 XiaoAI 스피커로 재생합니다."
+    }
+  },
+  "messages": {
+    "zh": {
+      "connection": "账号连接",
+      "devices": "音箱设备",
+      "playback": "播放输出",
+      "output": "音箱输出",
+      "name": "小米音箱"
+    },
+    "zh-Hant": {
+      "connection": "帳號連接",
+      "devices": "音箱裝置",
+      "playback": "播放輸出",
+      "output": "音箱輸出",
+      "name": "小米音箱"
+    },
+    "en": {
+      "connection": "Account connection",
+      "devices": "Speaker devices",
+      "playback": "Playback output",
+      "output": "Speaker output",
+      "name": "Xiaomi speakers"
+    },
+    "ja": {
+      "connection": "アカウント接続",
+      "devices": "スピーカーデバイス",
+      "playback": "再生出力",
+      "output": "スピーカー出力",
+      "name": "Xiaomi スピーカー"
+    },
+    "ko": {
+      "connection": "계정 연결",
+      "devices": "스피커 기기",
+      "playback": "재생 출력",
+      "output": "스피커 출력",
+      "name": "Xiaomi 스피커"
+    }
+  },
+  "dataVersion": 0,
+  "capabilities": {
+    "supportedFormats": [
+      "mp3"
+    ],
+    "play": true,
+    "stop": true,
+    "pause": true,
+    "resume": true,
+    "seek": true,
+    "volume": true,
+    "state": "unknown",
+    "metadata": false,
+    "remoteControls": false
+  },
+  "pages": [
+    {
+      "id": "connection",
+      "kind": "settings",
+      "access": "authenticated",
+      "scope": "account",
+      "playerPlacement": "inherit",
+      "label": "账号连接",
+      "labelKey": "connection",
+      "icon": "link"
+    },
+    {
+      "id": "devices",
+      "kind": "settings",
+      "access": "authenticated",
+      "scope": "account",
+      "playerPlacement": "inherit",
+      "label": "音箱设备",
+      "labelKey": "devices",
+      "icon": "speaker"
+    },
+    {
+      "id": "playback",
+      "kind": "settings",
+      "access": "authenticated",
+      "scope": "account",
+      "playerPlacement": "inherit",
+      "label": "播放输出",
+      "labelKey": "playback",
+      "icon": "play"
+    }
+  ],
+  "entries": [
+    {
+      "id": "song-output",
+      "slot": "menu.song",
+      "action": "output",
+      "label": "音箱输出",
+      "labelKey": "output",
+      "icon": "speaker",
+      "order": 60,
+      "access": "authenticated"
+    },
+    {
+      "id": "player-output",
+      "slot": "menu.player",
+      "action": "output",
+      "label": "音箱输出",
+      "labelKey": "output",
+      "icon": "speaker",
+      "order": 60,
+      "access": "authenticated"
+    },
+    {
+      "id": "connection-settings",
+      "slot": "sidebar.settings.admin",
+      "page": "connection",
+      "label": "小米音箱",
+      "labelKey": "name",
+      "icon": "speaker",
+      "order": 60,
+      "access": "admin"
+    }
+  ]
+}

@@ -1,0 +1,208 @@
+{
+  "id": "assistant",
+  "version": "0.1.0",
+  "hostApiVersion": 2,
+  "apiVersion": 1,
+  "dataVersion": 0,
+  "name": "助手",
+  "description": "通过对话查询音乐、控制播放并管理本人的记忆和歌单。",
+  "icon": "message",
+  "supportedLocales": [
+    "zh",
+    "zh-Hant",
+    "en",
+    "ja",
+    "ko"
+  ],
+  "defaultLocale": "en",
+  "metadata": {
+    "zh": {
+      "name": "助手",
+      "description": "通过对话查询音乐、控制播放并管理本人的记忆和歌单。"
+    },
+    "zh-Hant": {
+      "name": "助手",
+      "description": "透過對話查詢音樂、控制播放並管理自己的記憶與播放清單。"
+    },
+    "en": {
+      "name": "Assistant",
+      "description": "Find music, control playback and manage your memories and playlists through conversation."
+    },
+    "ja": {
+      "name": "アシスタント",
+      "description": "会話で音楽を探し、再生を操作し、自分のメモリとプレイリストを管理します。"
+    },
+    "ko": {
+      "name": "어시스턴트",
+      "description": "대화로 음악을 찾고 재생을 제어하며 본인의 메모리와 재생목록을 관리합니다."
+    }
+  },
+  "messages": {
+    "zh": {
+      "gateway": "AI 网关",
+      "assistant": "助手",
+      "lyrics": "歌词工作台",
+      "configuration": "设置",
+      "conversation": "对话",
+      "memory": "记忆",
+      "current": "当前歌词",
+      "tools": "文件与管理",
+      "candidates": "候选歌词",
+      "clear": "清空对话",
+      "name": "助手"
+    },
+    "zh-Hant": {
+      "gateway": "AI 閘道",
+      "assistant": "助手",
+      "lyrics": "歌詞工作台",
+      "configuration": "設定",
+      "conversation": "對話",
+      "memory": "記憶",
+      "current": "目前歌詞",
+      "tools": "檔案與管理",
+      "candidates": "候選歌詞",
+      "clear": "清空對話",
+      "name": "助手"
+    },
+    "en": {
+      "gateway": "AI gateway",
+      "assistant": "Assistant",
+      "lyrics": "Lyrics workspace",
+      "configuration": "Settings",
+      "conversation": "Conversation",
+      "memory": "Memory",
+      "current": "Current lyrics",
+      "tools": "Files and management",
+      "candidates": "Lyric candidates",
+      "clear": "Clear conversation",
+      "name": "Assistant"
+    },
+    "ja": {
+      "gateway": "AI ゲートウェイ",
+      "assistant": "アシスタント",
+      "lyrics": "歌詞ワークスペース",
+      "configuration": "設定",
+      "conversation": "会話",
+      "memory": "メモリ",
+      "current": "現在の歌詞",
+      "tools": "ファイルと管理",
+      "candidates": "歌詞候補",
+      "clear": "会話を消去",
+      "name": "アシスタント"
+    },
+    "ko": {
+      "gateway": "AI 게이트웨이",
+      "assistant": "어시스턴트",
+      "lyrics": "가사 작업 공간",
+      "configuration": "설정",
+      "conversation": "대화",
+      "memory": "메모리",
+      "current": "현재 가사",
+      "tools": "파일 및 관리",
+      "candidates": "가사 후보",
+      "clear": "대화 지우기",
+      "name": "어시스턴트"
+    }
+  },
+  "dependencies": {
+    "ai-gateway": {
+      "apiVersion": 1
+    }
+  },
+  "capabilityRoles": [
+    "admin",
+    "member"
+  ],
+  "pages": [
+    {
+      "id": "conversation",
+      "kind": "service",
+      "roles": [
+        "admin",
+        "member"
+      ],
+      "label": "对话",
+      "labelKey": "conversation",
+      "icon": "message",
+      "group": "assistant",
+      "playerPlacement": "sidebar",
+      "presentation": "workspace"
+    },
+    {
+      "id": "memory",
+      "kind": "service",
+      "roles": [
+        "admin",
+        "member"
+      ],
+      "label": "记忆",
+      "labelKey": "memory",
+      "icon": "info",
+      "group": "assistant",
+      "playerPlacement": "sidebar",
+      "presentation": "workspace"
+    },
+    {
+      "id": "configuration",
+      "kind": "settings",
+      "scope": "instance",
+      "roles": [
+        "admin"
+      ],
+      "label": "设置",
+      "labelKey": "configuration",
+      "icon": "settings"
+    }
+  ],
+  "entries": [
+    {
+      "id": "conversation",
+      "slot": "sidebar.primary",
+      "page": "conversation",
+      "roles": [
+        "admin",
+        "member"
+      ],
+      "label": "助手",
+      "labelKey": "name",
+      "icon": "message",
+      "order": 80
+    },
+    {
+      "id": "memory",
+      "slot": "sidebar.secondary",
+      "page": "memory",
+      "roles": [
+        "admin",
+        "member"
+      ],
+      "label": "记忆",
+      "labelKey": "memory",
+      "icon": "info",
+      "group": "assistant",
+      "order": 20
+    },
+    {
+      "id": "clear",
+      "slot": "sidebar.secondary",
+      "action": "clear",
+      "roles": [
+        "admin",
+        "member"
+      ],
+      "label": "清空对话",
+      "labelKey": "clear",
+      "icon": "trash",
+      "group": "assistant",
+      "order": 30
+    }
+  ],
+  "optionalDependencies": {
+    "roam": {
+      "apiVersion": 1,
+      "features": [
+        "roam-control"
+      ]
+    }
+  }
+}
