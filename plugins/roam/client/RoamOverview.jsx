@@ -18,10 +18,6 @@ export const ROAM_BATCH_SIZE_OPTIONS = [5, 10, 15, 20];
 const ALL_KEYS = ROAM_LANGUAGES.map((item) => item.key);
 
 export default function RoamOverview({
-    isAuthenticated,
-    items = [],
-    langCounts,
-    onOpenLanguage,
     onToggleRoam,
     randomRoam,
     setRandomRoamLanguage,
@@ -95,8 +91,6 @@ export default function RoamOverview({
     }, [isAllSelected, selectedKeys, locale]);
 
     return (
-        <div className="roam-page pb-16">
-            {/* 核心专区 1：随心漫游电台控制台 (精炼画报专属电台) */}
             <section aria-labelledby="roam-console-title" className="roam-radio">
                 <div className="roam-radio__panel relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#0c4a6e] via-[#075985] to-[#0f172a] text-white shadow-xl border border-white/10">
                     {/* 氛围流动背景装饰光晕 */}
@@ -211,57 +205,13 @@ export default function RoamOverview({
                         </div>
                     </div>
                 </div>
-            </section>
+
 
             {randomRoam.error && <div role="alert" className="flex flex-wrap items-center gap-3 text-sm text-[var(--muted)]">
                 <p>{t(randomRoam.error)}</p><button type="button" disabled={unavailable} onClick={onRetry} className="settings-button">{t('重试')}</button>
             </div>}
             {randomRoam.status === 'exhausted' && <p role="status" className="text-sm text-[var(--muted)]">{t('当前范围暂无可补充的歌曲')}</p>}
 
-            {/* 核心专区 2：曲库分类探索 (Apple Music "Browse Categories" 经典横向大色块矩阵) */}
-            <section aria-labelledby="roam-explore-title" className="space-y-4">
-                <div className="flex items-center justify-between">
-                    <h2 id="roam-explore-title" className="text-lg font-bold text-[var(--ink)] tracking-tight">{t("曲库探索")}</h2>
-                </div>
-
-                {/* 16:9 纯正 Apple Music "Browse Categories" 风格画报卡片矩阵 */}
-                <div className="roam-explore-grid">
-                    {items.map((lang) => {
-                        const title = t(lang.subtitle || lang.label);
-                        const imageUrl = lang.image || `/categories/${lang.key}.jpg`;
-
-                        return (
-                            <button
-                                key={lang.key}
-                                type="button"
-                                onClick={() => onOpenLanguage?.(lang)}
-                                disabled={unavailable}
-                                className={`group relative flex flex-col justify-end p-5 rounded-2xl bg-gradient-to-br ${lang.gradient} overflow-hidden aspect-[16/10] sm:aspect-[16/9] w-full text-left shadow-xs hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer active:scale-[0.98] border border-black/5`}
-                                title={t("点击进入{p0}曲库", { p0: (title) })}
-                            >
-                                {/* Apple Music 双色调摄影写真背景 */}
-                                <img
-                                    src={imageUrl}
-                                    alt=""
-                                    className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 pointer-events-none select-none"
-                                    loading="lazy"
-                                />
-
-                                {/* 经典纯净半透暗角，保证白色标题高对比度清晰呈现 */}
-                                <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/15 to-transparent pointer-events-none" />
-                                <div className="absolute inset-0 rounded-2xl ring-1 ring-inset ring-white/15 pointer-events-none" />
-
-                                {/* 左下角大字重类别名称（不显示曲目计数，保持杂志级极简纯净） */}
-                                <div className="relative z-10">
-                                    <span className="block text-xl sm:text-2xl font-bold tracking-tight text-white drop-shadow-md leading-tight">
-                                        {title}
-                                    </span>
-                                </div>
-                            </button>
-                        );
-                    })}
-                </div>
             </section>
-        </div>
     );
 }

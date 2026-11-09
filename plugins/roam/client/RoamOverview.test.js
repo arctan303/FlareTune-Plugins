@@ -20,16 +20,20 @@ function fixture() {
   return { harness, props, changes, navigations, notices, get toggles() { return toggles; }, get retries() { return retries; } };
 }
 
-test('roam plugin view emits controlled preferences and navigation without owning host stores', () => {
+test('roam radio preserves controlled preferences without duplicating host library categories', () => {
   const view = fixture(), tree = view.harness.render(view.props);
-  assert.equal(tree.props.className, 'roam-page pb-16');
+  assert.equal(tree.type, 'section');
+  assert.equal(tree.props.className, 'roam-radio');
+  assert.equal(nodes(tree).some(node => node.props?.className === 'roam-page pb-16'), false);
   assert.equal(nodes(tree).some(node => node.type === 'h1' || node.type === 'header'), false);
   assert.ok(nodes(tree).some(node => node.type === 'h2' && text(node) === '私人电台'));
   button(tree, '开启').props.onClick(); assert.equal(view.toggles, 1);
   button(tree, '中文').props.onClick();
   button(tree, '20').props.onClick();
   assert.deepEqual(view.changes, [['language', 'en,ja,ko,instrumental,other'], ['batch', 20]]);
-  button(tree, '中文歌曲').props.onClick(); assert.deepEqual(view.navigations, ['zh']);
+  assert.equal(button(tree, '中文歌曲'), undefined);
+  assert.equal(nodes(tree).some(node => node.props?.id === 'roam-explore-title' || node.props?.className === 'roam-explore-grid' || node.type === 'img'), false);
+  assert.deepEqual(view.navigations, []);
   assert.equal(view.notices.length, 2);
 });
 

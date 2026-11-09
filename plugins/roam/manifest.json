@@ -1,6 +1,6 @@
 {
   "id": "roam",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "hostApiVersion": 2,
   "apiVersion": 1,
   "dataVersion": 0,
@@ -75,19 +75,5 @@
       "playerPlacement": "inherit"
     }
   ],
-  "entries": [
-    {
-      "id": "open-roam",
-      "slot": "sidebar.primary",
-      "page": "browse",
-      "roles": [
-        "admin",
-        "member"
-      ],
-      "label": "漫游",
-      "labelKey": "name",
-      "icon": "shuffle",
-      "order": 30
-    }
-  ]
+  "entries": []
 }

@@ -1,12 +1,21 @@
-import React from 'react';
-import RoamOverview from "./RoamOverview.jsx";
-import { roamActions, useRoamState } from "./state.js";
+import React, { useMemo, useRef, useSyncExternalStore } from 'react';
+import RoamOverview from './RoamOverview.jsx';
+import { getRoamPageLease, subscribeRoamPageLeases, createRoamPageViewLease, inactiveRoamPageLease } from './pageLease.js';
 
-export default function RoamPluginPage({ host }) {
-  const randomRoam = useRoamState();
-  return <RoamOverview isAuthenticated items={host.catalog?.categories || []} randomRoam={randomRoam}
-    onToggleRoam={() => roamActions.setRandomRoamEnabled(!randomRoam.enabled)}
-    setRandomRoamLanguage={roamActions.setRandomRoamLanguage} setRandomRoamBatchSize={roamActions.setRandomRoamBatchSize}
-    onRetry={roamActions.retryRandomRoam}
-    onOpenLanguage={item => host.catalog?.openLanguage(item.key)} showToast={message => host.notify?.(message)} />;
+export default function RoamPluginPage({ host, lease: suppliedLease }) {
+  const registry = useMemo(() => ({ subscribe: listener => subscribeRoamPageLeases(host, listener),
+    getSnapshot: () => getRoamPageLease(host) }), [host]);
+  const available = useSyncExternalStore(registry.subscribe, registry.getSnapshot, registry.getSnapshot);
+  const captured = useRef({ host, lease: null });
+  if (captured.current.host !== host) captured.current = { host, lease: null };
+  if (!captured.current.lease && available !== inactiveRoamPageLease) captured.current.lease = available;
+  const runtime = suppliedLease || captured.current.lease || inactiveRoamPageLease;
+  const view = useMemo(() => createRoamPageViewLease(host, runtime), [host, runtime]);
+  const randomRoam = useSyncExternalStore(view.subscribe, view.getSnapshot, view.getSnapshot);
+  const actions = view.actions;
+  return <RoamOverview randomRoam={randomRoam}
+    onToggleRoam={() => actions.setRandomRoamEnabled(!randomRoam.enabled)}
+    setRandomRoamLanguage={actions.setRandomRoamLanguage} setRandomRoamBatchSize={actions.setRandomRoamBatchSize}
+    onRetry={actions.retryRandomRoam}
+    showToast={message => { if (host.isCurrent() && runtime.isCurrent()) host.notify?.(message); }} />;
 }
