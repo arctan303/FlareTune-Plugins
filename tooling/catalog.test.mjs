@@ -1,0 +1,72 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
+
+const root=fileURLToPath(new URL('../',import.meta.url));
+const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
+const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'
+  ?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
+const publishedEntryHashes={
+  'ai-gateway@0.1.0':'d9f82bbcd322b1cd2cb300d4f01fe97e9e4bcbf0c1628ada206bafe34d37eed4',
+  'assistant@0.1.0':'1fa3ce3cbd50eeb5c1e4dfd1c21487ba5e378bfd3b0adb3c4f07ecc789acc51d',
+  'lyrics-workbench@0.1.0':'1edf5e5816c3d40ca21e9f2699c4dcb165dc56713c49827a4b7d06fbdcf178ea',
+  'roam@0.1.1':'a70a364f376c2943557e452d5d3b037aac3d38f17bfbb83ab3fe698307e0e119',
+  'xiaomi-speaker@1.1.0':'60c0aa2f08f582e6c55cb91d4c951c794f63fc3d77614d8763e482126fde27d3',
+  'youtube-music@0.1.0':'8e11bf6ff8229c024292df68719620028a16fca63145660e1dfcbca2be8772ec',
+};
+const readCatalog=async file=>JSON.parse(await readFile(resolve(root,file),'utf8'));
+const key=row=>`${row.manifest.id}@${row.manifest.version}`;
+
+async function validateArtifacts(catalog) {
+  assert.equal(catalog.schemaVersion,1);
+  assert.equal(new Set(catalog.plugins.map(key)).size,catalog.plugins.length);
+  for(const row of catalog.plugins) {
+    const url=new URL(row.artifact.url);
+    const match=url.pathname.match(/^\/arctan303\/FlareTune-Plugins\/([a-f0-9]{40})\/(artifacts\/([^/]+)\/([^/]+)\/([a-f0-9]{64})\.json)$/);
+    assert.equal(url.origin,'https://raw.githubusercontent.com');
+    assert.ok(match,`immutable artifact URL: ${key(row)}`);
+    assert.equal(url.search,''); assert.equal(url.hash,'');
+    assert.equal(match[3],row.manifest.id); assert.equal(match[4],row.manifest.version);
+    assert.equal(match[5],row.artifact.sha256);
+    const bytes=await readFile(resolve(root,match[2]));
+    assert.equal(sha(bytes),row.artifact.sha256,`artifact bytes: ${key(row)}`);
+    const artifact=JSON.parse(bytes);
+    assert.equal(artifact.schemaVersion,2);
+    assert.deepEqual(artifact.manifest,row.manifest,`manifest: ${key(row)}`);
+  }
+}
+
+test('stable catalog preserves every previously published entry, including its manifest and immutable URL',async()=>{
+  const catalog=await readCatalog('repository.json');
+  for(const [identity,digest] of Object.entries(publishedEntryHashes)) {
+    const row=catalog.plugins.find(row=>key(row)===identity);
+    assert.ok(row,identity);
+    assert.equal(sha(JSON.stringify(canonical(row))),digest,identity);
+  }
+});
+
+test('stable catalog retains API2 choices alongside the pure API3 combination and excludes enhanced lyrics packages',async()=>{
+  const catalog=await readCatalog('repository.json');
+  assert.equal(catalog.plugins.length,11);
+  assert.deepEqual([...new Set(catalog.plugins.map(row=>row.manifest.hostApiVersion))].sort(),[2,3]);
+  for(const [id,version] of Object.entries({'ai-gateway':'0.2.1',assistant:'0.2.0','lyrics-workbench':'0.2.1',roam:'0.1.1','xiaomi-speaker':'1.1.1','youtube-music':'0.1.1'})) {
+    assert.ok(catalog.plugins.some(row=>row.manifest.id===id&&row.manifest.version===version));
+  }
+  assert.ok(!catalog.plugins.some(row=>row.manifest.id==='lyrics-workbench'&&row.manifest.version.startsWith('0.3.')
+    ||row.manifest.id==='youtube-music'&&row.manifest.version.startsWith('0.2.')));
+  await validateArtifacts(catalog);
+});
+
+test('permanent development catalog, when present, keeps all thirteen tested identities and content-addressed artifacts',async()=>{
+  let catalog;
+  try {catalog=await readCatalog('catalogs/development.json');} catch(error){if(error.code==='ENOENT')return;throw error;}
+  const original=await readCatalog('catalogs/health-ai-ownership-20261111.json');
+  assert.equal(catalog.plugins.length,13);
+  assert.deepEqual(catalog.plugins,original.plugins);
+  assert.ok(catalog.plugins.some(row=>key(row)==='lyrics-workbench@0.3.1'));
+  assert.ok(catalog.plugins.some(row=>key(row)==='youtube-music@0.2.1'));
+  await validateArtifacts(catalog);
+});

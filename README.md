@@ -2,7 +2,7 @@
 
 本仓库维护 FlareTune 的官方插件源码、可重复生成的插件包及插件目录。插件代码与宿主分开维护；安装、更新或卸载后，由站点管理员选择手动或自动重新构建并部署。
 
-首批目录：`ai-gateway`、`assistant`、`lyrics-workbench`、`roam`、`xiaomi-speaker`、`youtube-music`。实际可用状态以目录发布及宿主兼容性验证为准。当前拆分尚在联调，不能仅凭源码或本地包存在视为已发布。
+官方插件：`ai-gateway`、`assistant`、`lyrics-workbench`、`roam`、`xiaomi-speaker`、`youtube-music`。实际可用状态以目录发布及对应宿主兼容性验证为准，源码或本地包存在不代表已在你的站点安装。
 
 ## 布局
 
@@ -10,6 +10,17 @@
 - `plugins/<id>/{client,server,shared}/`：插件拥有的业务源码；SDK 和声明的跨插件服务由宿主提供。
 - `artifacts/<id>/<version>/<sha256>.json`：按文件完整字节摘要命名的不可变 v2 包。
 - `repository.json`：schemaVersion 1 官方目录；每个产物 URL 固定到已有 Git 提交。
+
+## 分支、目录与兼容范围
+
+本仓库长期保留 `main`、`dev`：日常开发在 `dev`，验收后将稳定范围合入 `main`；临时任务分支用完后删除。删除分支前先保留未整合改动和必要恢复证据。分支名不作为产物身份，每个 artifact 链接始终固定完整提交 SHA 和文件 SHA256。
+
+- 稳定源固定为 `https://raw.githubusercontent.com/arctan303/FlareTune-Plugins/main/repository.json`。保留已发布的旧版条目，供宿主按最低 API 和依赖选择；新版加入目录不强制更新已安装插件。
+- 开发源固定为 `https://raw.githubusercontent.com/arctan303/FlareTune-Plugins/dev/catalogs/development.json`，用于已验证的增强宿主和测试组合。它与稳定源分开，不通过临时分支名分发。
+- `main` 的当前源码组合为 Gateway 0.2.1、Assistant 0.2.0、Lyrics Workbench 0.2.1、Roam 0.1.1、Xiaomi Speaker 1.1.1、YouTube Music 0.1.1；前三项最低宿主 API 3，其余最低 API 2，旧版 API 2 条目继续保留。
+- `dev` 的工作台 0.3.x／YT 0.2.x 依赖增强歌词宿主的来源链及 `preferredAutomaticDocument`、`reliableAutomaticMatch` 等接口，普通 API 3 宿主并不具备这些能力。开发包只用于对应已验证增强宿主，不能仅凭 `hostApiVersion: 3` 认定兼容，也不纳入当前稳定目录。
+
+`catalogs/health-ai-ownership-20261111.json` 保留历史测试输入；新增开发配置使用永久开发源。
 
 ## 本地验证
 
@@ -39,14 +50,14 @@ v2 包最大 4 MiB，单文本最大 2 MiB；仅服务端允许 WASM，最多 2 
 npm run catalog:build -- --artifact-ref <artifact-commit-sha>
 ```
 
-4. 复核目录 manifest 与产物一致，URL 不含分支或可变 tag，且每个 SHA256 与下载字节一致。将目录作为后续提交发布。
+4. 将新候选条目与稳定目录历史条目合并，复核 manifest 与产物一致、URL 不含分支或可变 tag、每个 SHA256 与下载字节一致。已发布的同一 `id/version` 必须保留原 entry 全文及 SHA，不能同版本换包；源码或依赖改变需要先升插件版本。将目录作为后续提交发布。
 5. 回读公共目录和每个固定提交 URL，再在测试 Worker 验证安装、更新、卸载与构建激活。
 
-公共官方目录入口预定为 `https://raw.githubusercontent.com/arctan303/FlareTune-Plugins/main/repository.json`。目录可以更新；其中的产物链接必须保持不可变。不要在此仓库保存站点配置、部署 Hook、Cloudflare 凭据、构建访问密钥或用户数据。
+公共官方目录入口固定为上述 `main/repository.json`。目录可以更新，其中的产物链接必须保持不可变。`catalog:build` 只生成当前源码组合，不自动保留历史版本，提交前须完成上面的条目合并与身份核对。不要在此仓库保存站点配置、部署 Hook、Cloudflare 凭据、构建访问密钥或用户数据。
 
 ## 宿主接口
 
-插件声明 `hostApiVersion: 2`。`client/index.jsx` 提供前端入口，`server/index.js` 提供服务端入口；产物的 `exports` 将原始公开路径映射至实际预打包文件；CSS 和 JSON 保留原始公开文件键。跨插件服务只支持声明的 JavaScript 模块，JSON 数据文件不构成服务入口。SDK 与服务导入采用 `@flaretune/plugin-sdk...` 及 `@flaretune/plugin-service/<id>/<publicKey>`。
+插件通过各自 manifest 的 `hostApiVersion` 声明最低宿主要求；API 2／3 可在同一稳定目录中并存，开发包仍受上面的增强能力边界约束。`client/index.jsx` 提供前端入口，`server/index.js` 提供服务端入口；产物的 `exports` 将原始公开路径映射至实际预打包文件；CSS 和 JSON 保留原始公开文件键。跨插件服务只支持声明的 JavaScript 模块，JSON 数据文件不构成服务入口。SDK 与服务导入采用 `@flaretune/plugin-sdk...` 及 `@flaretune/plugin-service/<id>/<publicKey>`，`_private` 模块不作为跨插件公开服务。
 
 此版本不实现热加载或不可信代码沙箱。管理员确认信任来源后，插件作为站点代码运行；摘要校验不能代替信任发布者。
 
