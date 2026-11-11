@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { t, InfoTip, SettingsSection, SettingsActions, SettingsButton, SettingsSkeleton } from "@flaretune/plugin-sdk";
+import { t, useLocale, InfoTip, SettingsSection, SettingsButton, SettingsSkeleton } from "@flaretune/plugin-sdk";
+import { youtubeSettingsMessage } from '../shared/settingsMessages.js';
 
 import YouTubePreferences from './YouTubePreferences.jsx';
 
 export default function YouTubeSettings({ host }) {
+  const locale = useLocale();
   const [status, setStatus] = useState(null), [pending, setPending] = useState(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   const latest = useRef(null);
@@ -51,15 +53,14 @@ export default function YouTubeSettings({ host }) {
     } finally { if (host.isCurrent()) setBusy(false); }
   };
   if (!status && !error) return <SettingsSkeleton cards={1} rows={2} />;
-  return <div className="space-y-5"><SettingsSection title="YouTube Music" action={<SettingsActions>
+  return <div className="space-y-5"><SettingsSection title={t('账号连接')} action={
     <SettingsButton variant={status?.connected ? 'secondary' : 'primary'} disabled={busy || !status} onClick={() => change('start')}>{t(status?.connected ? '重新连接 YouTube' : '连接 YouTube')}</SettingsButton>
-    {(status?.connected || pending) && <SettingsButton variant="danger" disabled={busy} onClick={() => change('disconnect')}>{t('断开本网站的 YouTube 连接')}</SettingsButton>}
-  </SettingsActions>}>
+  }>
     <div className="space-y-3 text-sm leading-relaxed">
-      <p role="status" className="inline-flex items-center gap-1.5 font-medium text-[var(--ink)]">
+      {status && <p role="status" className="inline-flex items-center gap-1.5 font-medium text-[var(--ink)]">
         <span>{t(status?.connected ? 'YouTube Music 已连接' : 'YouTube Music 未连接')}</span>
         <InfoTip text={t('本插件提供音乐源，不同步此账号的私人收藏和歌单。')} />
-      </p>
+      </p>}
       {status?.needsReconnect && <p role="alert" className="text-[var(--muted)]">{t('连接凭据无法读取，请重新连接。')}</p>}
       {status && !status.cacheAvailable && <p role="alert" className="text-[var(--muted)]">{t('音乐源缓存尚未配置，请联系部署管理员。')}</p>}
       {pending && <div className="space-y-2 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4">
@@ -68,6 +69,15 @@ export default function YouTubeSettings({ host }) {
         <a href={pending.verificationUrl} target="_blank" rel="noreferrer noopener" className="inline-block font-medium text-[var(--accent)] hover:underline">{t('打开授权页面')}</a>
       </div>}
       {error && <p role="alert" className="text-red-600 dark:text-red-400">{t(error)}</p>}
+      {!status && error && <SettingsButton disabled={busy} onClick={() => {
+        setError(''); host.request('status', { admin: true }).then(accept).catch(() => {
+          if (host.isCurrent()) setError('无法读取 YouTube Music 连接状态，请重试。');
+        });
+      }}>{t('重试')}</SettingsButton>}
     </div>
+    {(status?.connected || pending) && <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--line)] pt-4">
+      <p className="min-w-0 flex-1 text-xs leading-relaxed text-[var(--muted)]">{youtubeSettingsMessage('disconnectConsequence', locale)}</p>
+      <SettingsButton variant="danger" disabled={busy} onClick={() => change('disconnect')}>{t('断开本网站的 YouTube 连接')}</SettingsButton>
+    </div>}
   </SettingsSection><YouTubePreferences host={host} /></div>;
 }

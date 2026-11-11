@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useLocale, SelectControl, SettingsSection, SettingsActions, SettingsButton, SettingsToggle, SettingsSkeleton } from '@flaretune/plugin-sdk';
+import { t, useLocale, SelectControl, SettingsSection, SettingsEditDialog, SettingsActions, SettingsButton, SettingsToggle, SettingsSkeleton } from '@flaretune/plugin-sdk';
 import { YOUTUBE_TRANSLATION_LANGUAGES } from '../shared/preferences.js';
 import { youtubeMessage } from '../shared/messages.js';
 
@@ -9,14 +9,21 @@ export default function YouTubePreferences({ host }) {
   const [setting, setSetting] = useState(null), [draft, setDraft] = useState(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   const saving = useRef(false);
-  const load = useCallback(async () => {
+  const editorRevision = useRef(null);
+  const load = useCallback(async ({ clearError = true } = {}) => {
     try {
       const result = await host.request('settings', { admin: true });
       if (!host.isCurrent()) return;
-      setSetting(result.setting); setDraft({ ...result.setting.value }); setError('');
+      setSetting(result.setting); if (clearError) setError('');
     } catch { if (host.isCurrent()) setError('settingsError'); }
   }, [host]);
   useEffect(() => { void load(); }, [load]);
+  const open = () => {
+    if (!host.isCurrent() || busy || !setting) return;
+    editorRevision.current = setting.revision;
+    setDraft({ ...setting.value }); setError('');
+  };
+  const close = () => { if (!saving.current) { setDraft(null); setError(''); } };
   const patch = (key, value) => setDraft(current => ({ ...current, [key]: value }));
   const save = async event => {
     event.preventDefault();
@@ -24,30 +31,41 @@ export default function YouTubePreferences({ host }) {
     saving.current = true; setBusy(true); setError('');
     try {
       const result = await host.request('settings', { admin: true, method: 'PUT',
-        body: { value: draft, expectedRevision: setting.revision } });
+        body: { value: draft, expectedRevision: editorRevision.current } });
       if (!host.isCurrent()) return;
-      setSetting(result.setting); setDraft({ ...result.setting.value });
+      setSetting(result.setting); setDraft(null);
       const currentSong = host.player.getSnapshot().currentSong;
       if (typeof currentSong?.id === 'string' && currentSong.id.startsWith('yt:')) host.lyrics.changed(currentSong.id);
       host.notify(tr('saved'));
     } catch (failure) {
       if (host.isCurrent()) {
-        if (failure.status === 409) await load();
+        if (failure.status === 409) await load({ clearError: false });
         setError('saveError');
       }
     } finally { saving.current = false; if (host.isCurrent()) setBusy(false); }
   };
-  const countries = [...new Set(['US', 'JP', 'KR', 'TW', 'HK', 'GB', 'DE', 'FR', 'CA', 'AU', 'SG', 'IN', draft?.region].filter(Boolean))];
+  const activeValue = draft || setting?.value;
+  const countries = [...new Set(['US', 'JP', 'KR', 'TW', 'HK', 'GB', 'DE', 'FR', 'CA', 'AU', 'SG', 'IN', activeValue?.region].filter(Boolean))];
   const regionName = code => { try { return new Intl.DisplayNames([locale], { type: 'region' }).of(code); } catch { return code; } };
-  const languages = [...new Set([...YOUTUBE_TRANSLATION_LANGUAGES, draft?.metadataLanguage].filter(Boolean))];
-  return <form onSubmit={event => void save(event)}>
-    <SettingsSection title={tr('preferences')} action={<SettingsActions>
-      <SettingsButton type="submit" variant="primary" disabled={busy || !draft || JSON.stringify(draft) === JSON.stringify(setting?.value)}>
-        {tr(busy ? 'saving' : 'save')}
-      </SettingsButton>
-    </SettingsActions>}>
-      {error && <p role="alert" className="mb-3 text-red-600 dark:text-red-400">{tr(error)}</p>}
-      {!draft ? (error ? <SettingsButton disabled={busy} onClick={() => void load()}>{tr('retry')}</SettingsButton> : <SettingsSkeleton cards={1} rows={3} />) : <div className="space-y-5">
+  const languages = [...new Set([...YOUTUBE_TRANSLATION_LANGUAGES, activeValue?.metadataLanguage].filter(Boolean))];
+  const languageName = code => YOUTUBE_TRANSLATION_LANGUAGES.includes(code) ? tr(code) : code;
+  if (!setting) return <SettingsSection title={tr('preferences')}>
+    {error ? <><p role="alert" className="text-red-600 dark:text-red-400">{tr(error)}</p><SettingsButton disabled={busy} onClick={() => void load()}>{tr('retry')}</SettingsButton></> : <SettingsSkeleton cards={1} rows={3} />}
+  </SettingsSection>;
+  const saved = setting.value;
+  return <div className="space-y-5">
+    <SettingsSection title={tr('preferences')} action={<SettingsButton disabled={busy} onClick={open}>{t('编辑')}</SettingsButton>}>
+      <dl className="grid gap-3 text-sm sm:grid-cols-2">
+        <div><dt className="text-xs text-[var(--muted)]">{tr('metadataLanguage')}</dt><dd>{languageName(saved.metadataLanguage)}</dd></div>
+        <div><dt className="text-xs text-[var(--muted)]">{tr('region')}</dt><dd>{regionName(saved.region)}</dd></div>
+        <div><dt className="text-xs text-[var(--muted)]">{tr('lyricsEnabled')}</dt><dd>{t(saved.lyricsEnabled ? '已启用' : '未启用')}</dd></div>
+        <div><dt className="text-xs text-[var(--muted)]">{tr('translationEnabled')}</dt><dd>{t(saved.lyricsEnabled && saved.translationEnabled ? '已启用' : '未启用')}</dd></div>
+        <div><dt className="text-xs text-[var(--muted)]">{tr('translationLanguage')}</dt><dd>{languageName(saved.translationLanguage)}</dd></div>
+      </dl>
+      {error && !draft && <p role="alert" className="text-red-600 dark:text-red-400">{tr(error)}</p>}
+    </SettingsSection>
+    {draft && <SettingsEditDialog title={tr('preferences')} onClose={close} busy={busy} message={error ? tr(error) : ''}>
+      <form className="space-y-5" onSubmit={event => void save(event)}>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="space-y-2"><span>{tr('metadataLanguage')}</span>
             <SelectControl aria-label={tr('metadataLanguage')} disabled={busy} value={draft.metadataLanguage} onChange={event => patch('metadataLanguage', event.target.value)}>
@@ -68,7 +86,10 @@ export default function YouTubePreferences({ host }) {
             {YOUTUBE_TRANSLATION_LANGUAGES.map(code => <option key={code} value={code}>{tr(code)}</option>)}
           </SelectControl>
         </label>
-      </div>}
-    </SettingsSection>
-  </form>;
+        <SettingsActions><SettingsButton closeDialog disabled={busy}>{t('取消')}</SettingsButton>
+          <SettingsButton type="submit" variant="primary" disabled={busy || JSON.stringify(draft) === JSON.stringify(setting.value)}>{tr(busy ? 'saving' : 'save')}</SettingsButton>
+        </SettingsActions>
+      </form>
+    </SettingsEditDialog>}
+  </div>;
 }

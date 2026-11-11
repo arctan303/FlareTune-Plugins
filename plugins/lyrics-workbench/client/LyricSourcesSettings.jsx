@@ -46,7 +46,7 @@ export default function LyricSourcesSettings({ setting, host, onSaved, onlineEna
   }
   function remove(source) {
     if (readOnly || locked || !window.confirm(t('移除“{p0}”歌词源？已保存的歌词不会删除。', { p0: source.name }))) return;
-    return persist({ version: 2, sources: value.sources.filter(item => item.id !== source.id) }, current.revision);
+    return persist({ version: 2, sources: value.sources.filter(item => item.id !== source.id) }, current.revision, true);
   }
   return <>
     <Section
@@ -84,16 +84,6 @@ export default function LyricSourcesSettings({ setting, host, onSaved, onlineEna
               >
                 <Edit3 size={11} className="shrink-0" />
                 <span>{t('编辑')}</span>
-              </SettingsButton>
-              <SettingsButton
-                variant="danger"
-                aria-label={t('删除') + ' ' + source.name}
-                disabled={locked}
-                onClick={() => void remove(source)}
-                className="inline-flex items-center gap-1"
-              >
-                <Trash2 size={11} className="shrink-0" />
-                <span>{t('删除')}</span>
               </SettingsButton>
             </SettingsActions>
           </div>
@@ -137,6 +127,12 @@ export default function LyricSourcesSettings({ setting, host, onSaved, onlineEna
         <LyricSourceQuickTest source={editor.value} host={host} busy={busy || !onlineEnabled} onTesting={setTesting} />
         <SettingsActions className="pt-2 border-t border-[var(--line)]"><SettingsButton closeDialog disabled={locked}>{t('取消')}</SettingsButton><SettingsButton type="submit" variant="primary" disabled={locked}>{t(busy ? '正在保存…' : '保存')}</SettingsButton></SettingsActions>
       </form>
+      {!editor.isNew && <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--line)] pt-4">
+        <p className="min-w-0 flex-1 text-xs leading-relaxed text-[var(--muted)]">{t('移除“{p0}”歌词源？已保存的歌词不会删除。', { p0: editor.value.name })}</p>
+        <SettingsButton variant="danger" disabled={locked} aria-label={t('删除') + ' ' + editor.value.name} onClick={() => void remove(editor.value)} className="inline-flex items-center gap-1">
+          <Trash2 size={11} aria-hidden="true" /><span>{t('删除')}</span>
+        </SettingsButton>
+      </div>}
     </SettingsEditDialog>}
   </>;
 }

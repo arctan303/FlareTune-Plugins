@@ -1,4 +1,5 @@
-import { SettingsInput, SettingsEditDialog, SettingsSkeleton, InfoTip, SettingsActions, SettingsButton, SelectControl, t, useSettingsResource } from "@flaretune/plugin-sdk";
+import { SettingsInput, SettingsEditDialog, SettingsSkeleton, InfoTip, SettingsActions, SettingsButton, SelectControl, t, useLocale, useSettingsResource } from "@flaretune/plugin-sdk";
+import { gatewayDeleteConsequence } from '../shared/settingsMessages.js';
 import { AI_PROTOCOLS, AI_SOURCES } from '../shared/aiProtocols.js';
 import React from 'react';
 
@@ -17,6 +18,7 @@ const cardClass = 'wallpaper-content-surface rounded-2xl border border-[var(--li
 const sectionClass = 'wallpaper-content-surface space-y-3.5 rounded-2xl border border-[var(--line)] bg-[var(--surface-raised)] p-4 sm:p-5 shadow-2xs';
 
 export default function GatewaySettings({ host }) {
+  const locale = useLocale();
   const load = React.useCallback(() => getAiProviders(host), [host]);
   const { data, setData, refresh, loading: refreshing, error: loadError } = useSettingsResource(load);
   const [editing, setEditing] = React.useState(null);
@@ -48,6 +50,7 @@ export default function GatewaySettings({ host }) {
     try {
       await deleteAiProvider(provider.id, provider.revision, host);
       setData(current => ({ ...current, providers: current.providers.filter(item => item.id !== provider.id) }));
+      closeEditor();
       setMessage('供应商已删除。');
       try { await refresh(); }
       catch { setMessage('供应商已删除，但列表刷新失败。请重新载入。'); }
@@ -89,15 +92,6 @@ export default function GatewaySettings({ host }) {
                 <Edit3 size={11} className="shrink-0" />
                 <span>{t('编辑')}</span>
               </SettingsButton>
-              <SettingsButton
-                variant="danger"
-                disabled={busy || !data?.ready}
-                onClick={() => void remove(provider)}
-                className="inline-flex items-center gap-1"
-              >
-                <Trash2 size={11} className="shrink-0" />
-                <span>{t('删除')}</span>
-              </SettingsButton>
             </SettingsActions>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
@@ -132,6 +126,12 @@ export default function GatewaySettings({ host }) {
         </SettingsActions>
         {message && <p role="alert" className="text-sm text-rose-600">{t(message)}</p>}
       </form>
+      {existing && <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--line)] pt-4">
+        <p className="min-w-0 flex-1 text-xs leading-relaxed text-[var(--muted)]">{gatewayDeleteConsequence(locale)}</p>
+        <SettingsButton variant="danger" disabled={busy || !data?.ready} onClick={() => void remove(existing)} className="inline-flex items-center gap-1">
+          <Trash2 size={11} aria-hidden="true" /><span>{t('删除供应商')}</span>
+        </SettingsButton>
+      </div>}
     </SettingsEditDialog>}
   </div>;
 }
