@@ -1,0 +1,584 @@
+{
+  "id": "health-ai-ownership-local",
+  "name": "FlareTune AI ownership local candidate",
+  "plugins": [
+    {
+      "artifact": {
+        "sha256": "ac560ef1febc7e56b30059c929fc36892f486510afc0a5c055ebdc38e504890a",
+        "url": "https://raw.githubusercontent.com/arctan303/FlareTune-Plugins/ffc640872054a7321ed1266e3a6c0f0215f104ae/artifacts/ai-gateway/0.2.0/ac560ef1febc7e56b30059c929fc36892f486510afc0a5c055ebdc38e504890a.json"
+      },
+      "manifest": {
+        "apiVersion": 1,
+        "capabilityRoles": [
+          "admin"
+        ],
+        "dataVersion": 0,
+        "defaultLocale": "en",
+        "description": "AI 渠道、模型、协议和密钥管理，为已安装的 AI 插件提供调用能力。",
+        "entries": [],
+        "hostApiVersion": 3,
+        "icon": "settings",
+        "id": "ai-gateway",
+        "messages": {
+          "en": {
+            "assistant": "Assistant",
+            "candidates": "Lyric candidates",
+            "clear": "Clear conversation",
+            "configuration": "Settings",
+            "conversation": "Conversation",
+            "current": "Current lyrics",
+            "gateway": "AI gateway",
+            "lyrics": "Lyrics workspace",
+            "memory": "Memory",
+            "name": "AI gateway",
+            "tools": "Files and management"
+          },
+          "ja": {
+            "assistant": "アシスタント",
+            "candidates": "歌詞候補",
+            "clear": "会話を消去",
+            "configuration": "設定",
+            "conversation": "会話",
+            "current": "現在の歌詞",
+            "gateway": "AI ゲートウェイ",
+            "lyrics": "歌詞ワークスペース",
+            "memory": "メモリ",
+            "name": "AI ゲートウェイ",
+            "tools": "ファイルと管理"
+          },
+          "ko": {
+            "assistant": "어시스턴트",
+            "candidates": "가사 후보",
+            "clear": "대화 지우기",
+            "configuration": "설정",
+            "conversation": "대화",
+            "current": "현재 가사",
+            "gateway": "AI 게이트웨이",
+            "lyrics": "가사 작업 공간",
+            "memory": "메모리",
+            "name": "AI 게이트웨이",
+            "tools": "파일 및 관리"
+          },
+          "zh": {
+            "assistant": "助手",
+            "candidates": "候选歌词",
+            "clear": "清空对话",
+            "configuration": "设置",
+            "conversation": "对话",
+            "current": "当前歌词",
+            "gateway": "AI 网关",
+            "lyrics": "歌词工作台",
+            "memory": "记忆",
+            "name": "AI 网关",
+            "tools": "文件与管理"
+          },
+          "zh-Hant": {
+            "assistant": "助手",
+            "candidates": "候選歌詞",
+            "clear": "清空對話",
+            "configuration": "設定",
+            "conversation": "對話",
+            "current": "目前歌詞",
+            "gateway": "AI 閘道",
+            "lyrics": "歌詞工作台",
+            "memory": "記憶",
+            "name": "AI 閘道",
+            "tools": "檔案與管理"
+          }
+        },
+        "metadata": {
+          "en": {
+            "description": "Manage AI providers, models, protocols and credentials for installed AI plugins.",
+            "name": "AI gateway"
+          },
+          "ja": {
+            "description": "AI プロバイダー、モデル、プロトコルと認証情報を管理し、インストール済みの AI プラグインに提供します。",
+            "name": "AI ゲートウェイ"
+          },
+          "ko": {
+            "description": "설치된 AI 플러그인에 사용할 공급자, 모델, 프로토콜 및 인증 정보를 관리합니다.",
+            "name": "AI 게이트웨이"
+          },
+          "zh": {
+            "description": "AI 渠道、模型、协议和密钥管理，为已安装的 AI 插件提供调用能力。",
+            "name": "AI 网关"
+          },
+          "zh-Hant": {
+            "description": "管理 AI 渠道、模型、協定與金鑰，供已安裝的 AI 外掛呼叫。",
+            "name": "AI 閘道"
+          }
+        },
+        "name": "AI 网关",
+        "pages": [
+          {
+            "icon": "settings",
+            "id": "configuration",
+            "kind": "settings",
+            "label": "设置",
+            "labelKey": "configuration",
+            "roles": [
+              "admin"
+            ],
+            "scope": "instance"
+          }
+        ],
+        "supportedLocales": [
+          "zh",
+          "zh-Hant",
+          "en",
+          "ja",
+          "ko"
+        ],
+        "version": "0.2.0"
+      }
+    },
+    {
+      "artifact": {
+        "sha256": "589f07a9045a65a592efeef20e914bb009b409535d39d1ceb2c85924ffcf806d",
+        "url": "https://raw.githubusercontent.com/arctan303/FlareTune-Plugins/ffc640872054a7321ed1266e3a6c0f0215f104ae/artifacts/assistant/0.2.0/589f07a9045a65a592efeef20e914bb009b409535d39d1ceb2c85924ffcf806d.json"
+      },
+      "manifest": {
+        "apiVersion": 1,
+        "capabilityRoles": [
+          "admin",
+          "member"
+        ],
+        "dataVersion": 0,
+        "defaultLocale": "en",
+        "dependencies": {
+          "ai-gateway": {
+            "apiVersion": 1,
+            "version": "^0.2.0"
+          }
+        },
+        "description": "通过对话查询音乐、控制播放并管理本人的记忆和歌单。",
+        "entries": [
+          {
+            "icon": "message",
+            "id": "conversation",
+            "label": "助手",
+            "labelKey": "name",
+            "order": 80,
+            "page": "conversation",
+            "roles": [
+              "admin",
+              "member"
+            ],
+            "slot": "sidebar.primary"
+          },
+          {
+            "group": "assistant",
+            "icon": "info",
+            "id": "memory",
+            "label": "记忆",
+            "labelKey": "memory",
+            "order": 20,
+            "page": "memory",
+            "roles": [
+              "admin",
+              "member"
+            ],
+            "slot": "sidebar.secondary"
+          },
+          {
+            "action": "clear",
+            "group": "assistant",
+            "icon": "trash",
+            "id": "clear",
+            "label": "清空对话",
+            "labelKey": "clear",
+            "order": 30,
+            "roles": [
+              "admin",
+              "member"
+            ],
+            "slot": "sidebar.secondary"
+          }
+        ],
+        "hostApiVersion": 3,
+        "icon": "message",
+        "id": "assistant",
+        "messages": {
+          "en": {
+            "assistant": "Assistant",
+            "candidates": "Lyric candidates",
+            "clear": "Clear conversation",
+            "configuration": "Settings",
+            "conversation": "Conversation",
+            "current": "Current lyrics",
+            "gateway": "AI gateway",
+            "lyrics": "Lyrics workspace",
+            "memory": "Memory",
+            "name": "Assistant",
+            "tools": "Files and management"
+          },
+          "ja": {
+            "assistant": "アシスタント",
+            "candidates": "歌詞候補",
+            "clear": "会話を消去",
+            "configuration": "設定",
+            "conversation": "会話",
+            "current": "現在の歌詞",
+            "gateway": "AI ゲートウェイ",
+            "lyrics": "歌詞ワークスペース",
+            "memory": "メモリ",
+            "name": "アシスタント",
+            "tools": "ファイルと管理"
+          },
+          "ko": {
+            "assistant": "어시스턴트",
+            "candidates": "가사 후보",
+            "clear": "대화 지우기",
+            "configuration": "설정",
+            "conversation": "대화",
+            "current": "현재 가사",
+            "gateway": "AI 게이트웨이",
+            "lyrics": "가사 작업 공간",
+            "memory": "메모리",
+            "name": "어시스턴트",
+            "tools": "파일 및 관리"
+          },
+          "zh": {
+            "assistant": "助手",
+            "candidates": "候选歌词",
+            "clear": "清空对话",
+            "configuration": "设置",
+            "conversation": "对话",
+            "current": "当前歌词",
+            "gateway": "AI 网关",
+            "lyrics": "歌词工作台",
+            "memory": "记忆",
+            "name": "助手",
+            "tools": "文件与管理"
+          },
+          "zh-Hant": {
+            "assistant": "助手",
+            "candidates": "候選歌詞",
+            "clear": "清空對話",
+            "configuration": "設定",
+            "conversation": "對話",
+            "current": "目前歌詞",
+            "gateway": "AI 閘道",
+            "lyrics": "歌詞工作台",
+            "memory": "記憶",
+            "name": "助手",
+            "tools": "檔案與管理"
+          }
+        },
+        "metadata": {
+          "en": {
+            "description": "Find music, control playback and manage your memories and playlists through conversation.",
+            "name": "Assistant"
+          },
+          "ja": {
+            "description": "会話で音楽を探し、再生を操作し、自分のメモリとプレイリストを管理します。",
+            "name": "アシスタント"
+          },
+          "ko": {
+            "description": "대화로 음악을 찾고 재생을 제어하며 본인의 메모리와 재생목록을 관리합니다.",
+            "name": "어시스턴트"
+          },
+          "zh": {
+            "description": "通过对话查询音乐、控制播放并管理本人的记忆和歌单。",
+            "name": "助手"
+          },
+          "zh-Hant": {
+            "description": "透過對話查詢音樂、控制播放並管理自己的記憶與播放清單。",
+            "name": "助手"
+          }
+        },
+        "name": "助手",
+        "optionalDependencies": {
+          "roam": {
+            "apiVersion": 1,
+            "features": [
+              "roam-control"
+            ]
+          }
+        },
+        "pages": [
+          {
+            "group": "assistant",
+            "icon": "message",
+            "id": "conversation",
+            "kind": "service",
+            "label": "对话",
+            "labelKey": "conversation",
+            "playerPlacement": "sidebar",
+            "presentation": "workspace",
+            "roles": [
+              "admin",
+              "member"
+            ]
+          },
+          {
+            "group": "assistant",
+            "icon": "info",
+            "id": "memory",
+            "kind": "service",
+            "label": "记忆",
+            "labelKey": "memory",
+            "playerPlacement": "sidebar",
+            "presentation": "workspace",
+            "roles": [
+              "admin",
+              "member"
+            ]
+          },
+          {
+            "icon": "settings",
+            "id": "configuration",
+            "kind": "settings",
+            "label": "设置",
+            "labelKey": "configuration",
+            "roles": [
+              "admin"
+            ],
+            "scope": "instance"
+          }
+        ],
+        "serviceConfigurations": {
+          "ai-gateway": [
+            "ai-model"
+          ]
+        },
+        "supportedLocales": [
+          "zh",
+          "zh-Hant",
+          "en",
+          "ja",
+          "ko"
+        ],
+        "version": "0.2.0"
+      }
+    },
+    {
+      "artifact": {
+        "sha256": "65a28f2231ccabaef2bc0bb1fd0896ff4aecae56ec0beefe4595a7bc77d8f12d",
+        "url": "https://raw.githubusercontent.com/arctan303/FlareTune-Plugins/ffc640872054a7321ed1266e3a6c0f0215f104ae/artifacts/lyrics-workbench/0.2.0/65a28f2231ccabaef2bc0bb1fd0896ff4aecae56ec0beefe4595a7bc77d8f12d.json"
+      },
+      "manifest": {
+        "apiVersion": 1,
+        "capabilityRoles": [
+          "admin",
+          "member"
+        ],
+        "dataVersion": 0,
+        "defaultLocale": "en",
+        "description": "查看、选择和编辑歌词；安装 AI 网关后可使用 AI 辅助功能。",
+        "entries": [
+          {
+            "group": "lyrics",
+            "icon": "lyrics",
+            "id": "current",
+            "label": "当前歌词",
+            "labelKey": "current",
+            "order": 10,
+            "page": "current",
+            "roles": [
+              "admin",
+              "member"
+            ],
+            "slot": "sidebar.secondary"
+          },
+          {
+            "group": "lyrics",
+            "icon": "lyrics",
+            "id": "tools",
+            "label": "文件与管理",
+            "labelKey": "tools",
+            "order": 11,
+            "page": "tools",
+            "roles": [
+              "admin",
+              "member"
+            ],
+            "slot": "sidebar.secondary"
+          },
+          {
+            "group": "lyrics",
+            "icon": "lyrics",
+            "id": "candidates",
+            "label": "候选歌词",
+            "labelKey": "candidates",
+            "order": 12,
+            "page": "candidates",
+            "roles": [
+              "admin",
+              "member"
+            ],
+            "slot": "sidebar.secondary"
+          }
+        ],
+        "hostApiVersion": 3,
+        "icon": "lyrics",
+        "id": "lyrics-workbench",
+        "messages": {
+          "en": {
+            "assistant": "Assistant",
+            "candidates": "Lyric candidates",
+            "clear": "Clear conversation",
+            "configuration": "Settings",
+            "conversation": "Conversation",
+            "current": "Current lyrics",
+            "gateway": "AI gateway",
+            "lyrics": "Lyrics workspace",
+            "memory": "Memory",
+            "name": "Lyrics workspace",
+            "tools": "Files and management"
+          },
+          "ja": {
+            "assistant": "アシスタント",
+            "candidates": "歌詞候補",
+            "clear": "会話を消去",
+            "configuration": "設定",
+            "conversation": "会話",
+            "current": "現在の歌詞",
+            "gateway": "AI ゲートウェイ",
+            "lyrics": "歌詞ワークスペース",
+            "memory": "メモリ",
+            "name": "歌詞ワークスペース",
+            "tools": "ファイルと管理"
+          },
+          "ko": {
+            "assistant": "어시스턴트",
+            "candidates": "가사 후보",
+            "clear": "대화 지우기",
+            "configuration": "설정",
+            "conversation": "대화",
+            "current": "현재 가사",
+            "gateway": "AI 게이트웨이",
+            "lyrics": "가사 작업 공간",
+            "memory": "메모리",
+            "name": "가사 작업 공간",
+            "tools": "파일 및 관리"
+          },
+          "zh": {
+            "assistant": "助手",
+            "candidates": "候选歌词",
+            "clear": "清空对话",
+            "configuration": "设置",
+            "conversation": "对话",
+            "current": "当前歌词",
+            "gateway": "AI 网关",
+            "lyrics": "歌词工作台",
+            "memory": "记忆",
+            "name": "歌词工作台",
+            "tools": "文件与管理"
+          },
+          "zh-Hant": {
+            "assistant": "助手",
+            "candidates": "候選歌詞",
+            "clear": "清空對話",
+            "configuration": "設定",
+            "conversation": "對話",
+            "current": "目前歌詞",
+            "gateway": "AI 閘道",
+            "lyrics": "歌詞工作台",
+            "memory": "記憶",
+            "name": "歌詞工作台",
+            "tools": "檔案與管理"
+          }
+        },
+        "metadata": {
+          "en": {
+            "description": "View, choose and edit lyrics, with optional AI assistance through the AI gateway.",
+            "name": "Lyrics workspace"
+          },
+          "ja": {
+            "description": "歌詞を表示、選択、編集します。AI ゲートウェイをインストールすると AI 支援も使えます。",
+            "name": "歌詞ワークスペース"
+          },
+          "ko": {
+            "description": "가사를 보고 선택하고 편집합니다. AI 게이트웨이를 설치하면 AI 보조 기능도 사용할 수 있습니다.",
+            "name": "가사 작업 공간"
+          },
+          "zh": {
+            "description": "查看、选择和编辑歌词；安装 AI 网关后可使用 AI 辅助功能。",
+            "name": "歌词工作台"
+          },
+          "zh-Hant": {
+            "description": "檢視、選擇和編輯歌詞；安裝 AI 閘道後可使用 AI 輔助功能。",
+            "name": "歌詞工作台"
+          }
+        },
+        "name": "歌词工作台",
+        "optionalDependencies": {
+          "ai-gateway": {
+            "apiVersion": 1,
+            "features": [
+              "ai"
+            ],
+            "version": "^0.2.0"
+          }
+        },
+        "pages": [
+          {
+            "group": "lyrics",
+            "icon": "lyrics",
+            "id": "current",
+            "kind": "service",
+            "label": "当前歌词",
+            "labelKey": "current",
+            "playerPlacement": "sidebar",
+            "roles": [
+              "admin",
+              "member"
+            ]
+          },
+          {
+            "group": "lyrics",
+            "icon": "lyrics",
+            "id": "tools",
+            "kind": "service",
+            "label": "文件与管理",
+            "labelKey": "tools",
+            "playerPlacement": "sidebar",
+            "roles": [
+              "admin",
+              "member"
+            ]
+          },
+          {
+            "group": "lyrics",
+            "icon": "lyrics",
+            "id": "candidates",
+            "kind": "service",
+            "label": "候选歌词",
+            "labelKey": "candidates",
+            "playerPlacement": "sidebar",
+            "roles": [
+              "admin",
+              "member"
+            ]
+          },
+          {
+            "icon": "settings",
+            "id": "configuration",
+            "kind": "settings",
+            "label": "设置",
+            "labelKey": "configuration",
+            "roles": [
+              "admin"
+            ],
+            "scope": "instance"
+          }
+        ],
+        "serviceConfigurations": {
+          "ai-gateway": [
+            "ai-model"
+          ]
+        },
+        "supportedLocales": [
+          "zh",
+          "zh-Hant",
+          "en",
+          "ja",
+          "ko"
+        ],
+        "version": "0.2.0"
+      }
+    }
+  ],
+  "schemaVersion": 1
+}
