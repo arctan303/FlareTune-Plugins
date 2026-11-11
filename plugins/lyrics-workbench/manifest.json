@@ -185,6 +185,7 @@
       "labelKey": "current",
       "icon": "lyrics",
       "group": "lyrics",
+      "presentation": "workspace",
       "playerPlacement": "sidebar"
     },
     {
@@ -211,6 +212,7 @@
       "labelKey": "candidates",
       "icon": "lyrics",
       "group": "lyrics",
+      "presentation": "workspace",
       "playerPlacement": "sidebar"
     },
     {
