@@ -1,3 +1,5 @@
+import { isTranslationTarget } from '../shared/translation-languages.js';
+import { markManuallySelectedArtifact } from './sourceCore.js';
 import {
   fetchLyricsDocumentWithFallback,
   fetchUncachedSourceLyricsDocument,
@@ -30,7 +32,6 @@ import {
   LyricCandidateInspectionError,
 } from "@flaretune/plugin-sdk/server/lyric-candidates";
 import { readBoundedJson } from "@flaretune/plugin-sdk/server/http-security";
-import { isValidSongLanguage } from "@flaretune/plugin-sdk/server/song-language";
 import { guardExternalLyricStore, isExternalLyricSongId, lyricSongStillExists, resolveLyricSong } from "@flaretune/plugin-sdk/server/playback-lyrics";
 import { storedLyricTranslationLanguage, isLyricSourceId } from "@flaretune/plugin-sdk/server/lyric-source-contract";
 import { createPluginServiceLease } from "@flaretune/plugin-sdk/server/service-leases";
@@ -90,8 +91,7 @@ const validEtag = (value) => value === null
   || (typeof value === 'string' && value.length > 0 && value.length <= 256
     && !/[\u0000-\u001f\u007f]/u.test(value));
 
-const validTranslationLanguage = value => value === undefined
-  || (isValidSongLanguage(value) && !['other', 'instrumental'].includes(value));
+const validTranslationLanguage = value => value === undefined || isTranslationTarget(value);
 
 function currentData(read, song, now, targetLanguage = null, viewerAccountId = null) {
   if (read.state === 'missing' || read.state === 'legacy' || read.artifact?.status === 'reset') {
@@ -205,6 +205,7 @@ function knownFailure(error, headers) {
 }
 
 async function writeCurrent(store, songId, artifact, current, etag) {
+  artifact = markManuallySelectedArtifact(artifact);
   if (current.state === 'missing') return store.createIfAbsent(songId, artifact);
   return store.putIfMatch(songId, artifact, etag);
 }
@@ -276,6 +277,9 @@ export async function handleLyricsWorkbenchRoute(request, url, db, headers = {},
     } catch (error) {
       if (error instanceof AuthError) throw error;
       throw new Error('AI_ASSISTANT_CONFIG_UNAVAILABLE');
+    }
+    if (settings.onlineEnabled === false && (['candidates', 'candidates/inspect'].includes(action) || action === 'asset' && method === 'PUT')) {
+      return failure(409, 'LYRIC_ONLINE_DISABLED', 'Online lyric retrieval is disabled', headers);
     }
     const targetLanguage = settings.targetLanguage;
     let gatewayAvailable = false, aiLease = null;
@@ -510,12 +514,12 @@ export async function handleLyricsWorkbenchRoute(request, url, db, headers = {},
       if (!matches(current, body.etag)) return failure(409, 'LYRIC_ASSET_CONFLICT', 'Lyric asset changed', headers, dataOf(current));
       const base = applyLyricOffset({ version: 2, ...current.artifact.original }, current.artifact.offsetMs);
       const shifted = applyLyricOffset(base, body.deltaMs);
-      const written = await store.putIfMatch(songId, {
+      const written = await store.putIfMatch(songId, markManuallySelectedArtifact({
         ...current.artifact,
         original: { ...current.artifact.original, syncMode: shifted.syncMode, lines: shifted.lines },
         offsetMs: 0,
         updatedAt: new Date(now()).toISOString(),
-      }, current.etag);
+      }), current.etag);
       if (written.state === 'conflict') return failure(409, 'LYRIC_ASSET_CONFLICT', 'Lyric asset changed', headers);
       return success(dataOf({ ...written, state: 'found' }), 200, headers);
     }
@@ -530,8 +534,8 @@ export async function handleLyricsWorkbenchRoute(request, url, db, headers = {},
         return failure(404, 'LYRIC_ASSET_NOT_FOUND', 'Lyric asset not found', headers);
       }
       if (!matches(current, body.etag)) return failure(409, 'LYRIC_ASSET_CONFLICT', 'Lyric asset changed', headers, dataOf(current));
-      const written = await store.putIfMatch(songId, { ...current.artifact,
-        offsetMs: body.offsetMs, updatedAt: new Date(now()).toISOString() }, current.etag);
+      const written = await store.putIfMatch(songId, markManuallySelectedArtifact({ ...current.artifact,
+        offsetMs: body.offsetMs, updatedAt: new Date(now()).toISOString() }), current.etag);
       if (written.state === 'conflict') return failure(409, 'LYRIC_ASSET_CONFLICT', 'Lyric asset changed', headers);
       return success(dataOf({ ...written, state: 'found' }), 200, headers);
     }

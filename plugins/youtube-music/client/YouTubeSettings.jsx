@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { t, InfoTip, SettingsSection, SettingsActions, SettingsButton, SettingsSkeleton } from "@flaretune/plugin-sdk";
 
+import YouTubePreferences from './YouTubePreferences.jsx';
+
 export default function YouTubeSettings({ host }) {
   const [status, setStatus] = useState(null), [pending, setPending] = useState(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
@@ -49,7 +51,7 @@ export default function YouTubeSettings({ host }) {
     } finally { if (host.isCurrent()) setBusy(false); }
   };
   if (!status && !error) return <SettingsSkeleton cards={1} rows={2} />;
-  return <SettingsSection title="YouTube Music" action={<SettingsActions>
+  return <div className="space-y-5"><SettingsSection title="YouTube Music" action={<SettingsActions>
     <SettingsButton variant={status?.connected ? 'secondary' : 'primary'} disabled={busy || !status} onClick={() => change('start')}>{t(status?.connected ? '重新连接 YouTube' : '连接 YouTube')}</SettingsButton>
     {(status?.connected || pending) && <SettingsButton variant="danger" disabled={busy} onClick={() => change('disconnect')}>{t('断开本网站的 YouTube 连接')}</SettingsButton>}
   </SettingsActions>}>
@@ -67,5 +69,5 @@ export default function YouTubeSettings({ host }) {
       </div>}
       {error && <p role="alert" className="text-red-600 dark:text-red-400">{t(error)}</p>}
     </div>
-  </SettingsSection>;
+  </SettingsSection><YouTubePreferences host={host} /></div>;
 }

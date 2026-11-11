@@ -1,12 +1,14 @@
-import { isValidSongLanguage } from "@flaretune/plugin-sdk/server/song-language";
+import { isTranslationTarget } from '../shared/translation-languages.js';
 import { DEFAULT_LYRIC_TRANSLATION_RULES } from "./defaultPrompts.js";
 
 export const DEFAULT_LYRIC_AI_CONFIG = Object.freeze({
+  onlineEnabled: true,
+  lyricPreference: 'word',
   provider: 'deepseek',
   model: 'deepseek-chat',
   temperature: 0.2,
   styleRules: DEFAULT_LYRIC_TRANSLATION_RULES,
-  targetLanguage: 'zh',
+  targetLanguage: 'en',
   cleanDirtyLyrics: true,
   translateLyrics: true,
   detectLanguage: true,
@@ -16,7 +18,8 @@ export const DEFAULT_LYRIC_AI_CONFIG = Object.freeze({
 });
 
 const CONFIG_FIELDS = Object.keys(DEFAULT_LYRIC_AI_CONFIG);
-const LEGACY_CONFIG_FIELDS = CONFIG_FIELDS.filter((key) => !['completionEnabled', 'automaticCompletionEnabled'].includes(key));
+const OPTIONAL_FIELDS = ['completionEnabled', 'automaticCompletionEnabled', 'onlineEnabled', 'lyricPreference'];
+const LEGACY_CONFIG_FIELDS = CONFIG_FIELDS.filter(key => !OPTIONAL_FIELDS.includes(key));
 
 export function lyricAiProcessingKey(config) {
   return [config.targetLanguage,
@@ -28,7 +31,6 @@ export function lyricAiProcessingKey(config) {
 
 export function normalizeLyricAiConfig(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || ![CONFIG_FIELDS.length, LEGACY_CONFIG_FIELDS.length].includes(Object.keys(value).length)
     || Object.keys(value).some((key) => !CONFIG_FIELDS.includes(key))
     || LEGACY_CONFIG_FIELDS.some((key) => !Object.hasOwn(value, key))
     || (Object.hasOwn(value, 'completionEnabled')
@@ -43,14 +45,17 @@ export function normalizeLyricAiConfig(value) {
     || typeof config.temperature !== 'number' || !Number.isFinite(config.temperature)
     || config.temperature < 0 || config.temperature > 2
     || typeof config.styleRules !== 'string' || config.styleRules.length > 8_000
-    || !isValidSongLanguage(config.targetLanguage)
+    || !isTranslationTarget(config.targetLanguage)
     || ['instrumental', 'other'].includes(config.targetLanguage)
     || ['cleanDirtyLyrics', 'translateLyrics', 'detectLanguage', 'referenceExistingTranslation']
       .some((key) => typeof config[key] !== 'boolean')
+    || typeof config.onlineEnabled !== 'boolean'
+    || !['word', 'line'].includes(config.lyricPreference)
     || typeof config.completionEnabled !== 'boolean'
     || typeof config.automaticCompletionEnabled !== 'boolean'
     || ![config.cleanDirtyLyrics, config.translateLyrics, config.detectLanguage].some(Boolean)) {
     throw new TypeError('INVALID_LYRIC_AI_CONFIG');
   }
-  return { ...config, provider, model };
+  return { ...config, provider, model, completionEnabled: config.completionEnabled && config.translateLyrics };
+
 }

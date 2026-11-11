@@ -1,3 +1,4 @@
+import { loadLyricPolicySnapshot } from './config.js';
 import { InstanceAdminError } from "@flaretune/plugin-sdk/server/admin-common";
 import { readDefinedSettings, updateDefinedSetting } from "@flaretune/plugin-sdk/server/settings";
 import { DEFAULT_LYRIC_AI_CONFIG, normalizeLyricAiConfig } from "./policy.js";
@@ -16,10 +17,12 @@ const definitions = {
 export async function getAdminSettings(db, actor) {
   const settings = await readDefinedSettings(db, actor, definitions);
   if (settings['lyrics.ai'].revision === 0) {
+    const initial = (await loadLyricPolicySnapshot(db)).config;
+    settings['lyrics.ai'].value = { ...initial };
     const legacy = await db.prepare(`SELECT provider, model, temperature, system_prompt
       FROM AI_Assistants WHERE id = 'lyric_translator'`).first();
     if (legacy?.provider && legacy?.model) settings['lyrics.ai'].value = normalizeLyricAiConfig({
-      ...DEFAULT_LYRIC_AI_CONFIG, provider: legacy.provider, model: legacy.model,
+      ...initial, provider: legacy.provider, model: legacy.model,
       temperature: legacy.temperature ?? 0.2, styleRules: DEFAULT_LYRIC_AI_CONFIG.styleRules });
   }
   return { settings, defaults: { lyrics: { styleRules: DEFAULT_LYRIC_AI_CONFIG.styleRules } } };

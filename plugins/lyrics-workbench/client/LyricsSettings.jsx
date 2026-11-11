@@ -1,15 +1,14 @@
 import React from 'react';
-import { t, SettingsSection, SettingsActions, SettingsButton, SettingsToggle, SettingsInput,
-  SettingsTextarea, SelectControl, InfoTip, ALL_LANGUAGES, ServiceModelSettings } from "@flaretune/plugin-sdk";
-import LyricSourcesSettings from "./LyricSourcesSettings.jsx";
+import { t, useLocale, SettingsSection, SettingsActions, SettingsButton, SettingsToggle, SelectControl, InfoTip, ServiceModelSettings } from '@flaretune/plugin-sdk';
+import LyricSourcesSettings from './LyricSourcesSettings.jsx';
+import { TRANSLATION_TARGETS, translationTargetLabel } from '../shared/translation-languages.js';
+import { workbenchMessage } from '../shared/messages.js';
 
-const FLAGS = [
-  ['completionEnabled', '歌词 AI'],
-  ['automaticCompletionEnabled', '播放时自动补全缺少目标语言译文的歌词'],
-  ['cleanDirtyLyrics', '清理非演唱歌词整行'], ['translateLyrics', '生成目标语言译文'],
-  ['detectLanguage', '识别并更新歌曲语言'], ['referenceExistingTranslation', '将同语言旧译文作为翻译参考'],
-];
+const legacyDraft = value => ({ onlineEnabled: true, lyricPreference: 'word', ...value });
+const modeOf = value => !value.completionEnabled || value.translateLyrics === false ? 'off' : value.automaticCompletionEnabled ? 'auto' : 'manual';
 export default function LyricsSettings({ host }) {
+  const locale = useLocale();
+  const tr = key => workbenchMessage(key, locale);
   const [resource, setResource] = React.useState(null);
   const [draft, setDraft] = React.useState(null);
   const [error, setError] = React.useState('');
@@ -19,10 +18,9 @@ export default function LyricsSettings({ host }) {
   const load = React.useCallback(async () => {
     setError('');
     try {
-      const [result, sourceResult] = await Promise.all([host.request('settings', { admin: true }),
-        host.request('sources-settings', { admin: true })]);
+      const [result, sourceResult] = await Promise.all([host.request('settings', { admin: true }), host.request('sources-settings', { admin: true })]);
       if (!host.isCurrent()) return;
-      setResource(result); setDraft({ ...result.setting.value }); setSources(sourceResult.setting);
+      setResource(result); setDraft(legacyDraft(result.setting.value)); setSources(sourceResult.setting);
     } catch (failure) { if (host.isCurrent()) setError(failure.message || '请求失败'); }
   }, [host]);
   React.useEffect(() => { void load(); }, [load]);
@@ -30,14 +28,11 @@ export default function LyricsSettings({ host }) {
   const save = async event => {
     event.preventDefault();
     if (!host.isCurrent() || saving.current || !draft) return;
-    saving.current = true;
-    setBusy(true); setError('');
+    saving.current = true; setBusy(true); setError('');
     try {
-      const result = await host.request('settings', { admin: true, method: 'PUT',
-        body: { value: draft, expectedRevision: resource.setting.revision } });
+      const result = await host.request('settings', { admin: true, method: 'PUT', body: { value: draft, expectedRevision: resource.setting.revision } });
       if (!host.isCurrent()) return;
-      setResource(current => ({ ...current, setting: result.setting })); setDraft({ ...result.setting.value });
-      host.notify(t('设置已成功保存。'));
+      setResource(current => ({ ...current, setting: result.setting })); setDraft(legacyDraft(result.setting.value)); host.notify(t('设置已成功保存。'));
     } catch (failure) {
       if (!host.isCurrent()) return;
       setError(failure.message || '请求失败');
@@ -48,29 +43,33 @@ export default function LyricsSettings({ host }) {
     {error && <SettingsButton onClick={() => void load()}>{t('重试')}</SettingsButton>}</div>;
   return <div className="space-y-5"><ServiceModelSettings host={host} /><form className="space-y-5" onSubmit={event => void save(event)}>
     {error && <p role="alert">{t(error)}</p>}
-    <SettingsSection title={t('歌词 AI')}>
-      <div className="grid gap-4 sm:grid-cols-2">
+    <SettingsSection title={tr('policy')}>
+      <SettingsToggle label={tr('onlineEnabled')} checked={Boolean(draft.onlineEnabled)} disabled={busy}
+        onChange={event => patch('onlineEnabled', event.target.checked)} />
+      <div className="grid gap-4 sm:grid-cols-2 mt-5">
+        <label className="space-y-2"><span>{tr('lyricPreference')}</span>
+          <SelectControl aria-label={tr('lyricPreference')} value={draft.lyricPreference} disabled={busy} onChange={event => patch('lyricPreference', event.target.value)}>
+            <option value="word">{tr('preferWord')}</option><option value="line">{tr('preferLine')}</option>
+          </SelectControl>
+        </label>
+        <label className="space-y-2"><span>{tr('aiCompletion')}</span>
+          <SelectControl aria-label={tr('aiCompletion')} value={modeOf(draft)} disabled={busy} onChange={event => {
+            const mode = event.target.value;
+            setDraft(current => ({ ...current, completionEnabled: mode !== 'off', automaticCompletionEnabled: mode === 'auto',
+              ...(mode !== 'off' ? { translateLyrics: true } : {}) }));
+          }}>
+            <option value="off">{tr('off')}</option><option value="manual">{tr('manual')}</option><option value="auto">{tr('automatic')}</option>
+          </SelectControl>
+        </label>
         <label className="space-y-2"><span className="flex items-center gap-2">{t('目标译文语言')}
           <InfoTip text={t('实例内所有用户共用一份译文；修改后旧译文不会自动变成新语言。')} /></span>
-          <SelectControl aria-label={t('目标译文语言')} value={draft.targetLanguage} disabled={busy}
-            onChange={event => patch('targetLanguage', event.target.value)}>
-            {ALL_LANGUAGES.filter(({ code }) => !['instrumental', 'other'].includes(code)).map(({ code, label }) =>
-              <option key={code} value={code}>{t(label)}</option>)}
+          <SelectControl aria-label={t('目标译文语言')} value={draft.targetLanguage} disabled={busy} onChange={event => patch('targetLanguage', event.target.value)}>
+            {TRANSLATION_TARGETS.map(code => <option key={code} value={code}>{translationTargetLabel(code, locale)}</option>)}
           </SelectControl>
         </label>
       </div>
-      <div className="space-y-3 mt-5">{FLAGS.map(([key, label]) => <SettingsToggle key={key} label={t(label)}
-        checked={Boolean(draft[key])} disabled={busy} onChange={event => patch(key, event.target.checked)} />)}</div>
-      <div className="space-y-2 mt-5">
-        <div className="flex items-center justify-between gap-3"><label htmlFor="plugin-lyrics-rules">{t('歌词处理准则')}</label>
-          <SettingsButton disabled={busy} onClick={() => patch('styleRules', resource.defaults?.styleRules || '')}>
-            {t('重置为系统默认准则')}
-          </SettingsButton></div>
-        <SettingsTextarea id="plugin-lyrics-rules" maxLength={8000} className="w-full min-h-64" value={draft.styleRules}
-          disabled={busy} onChange={event => patch('styleRules', event.target.value)} />
-      </div>
     </SettingsSection>
-    <SettingsActions><SettingsButton disabled={busy} onClick={() => setDraft({ ...resource.setting.value })}>{t('取消')}</SettingsButton>
-      <SettingsButton type="submit" variant="primary" disabled={busy}>{t(busy ? '正在保存…' : '保存歌词 AI 设置')}</SettingsButton></SettingsActions>
-  </form><LyricSourcesSettings setting={sources} host={host} onSaved={setSources} /></div>;
+    <SettingsActions><SettingsButton disabled={busy} onClick={() => setDraft(legacyDraft(resource.setting.value))}>{t('取消')}</SettingsButton>
+      <SettingsButton type="submit" variant="primary" disabled={busy}>{t(busy ? '正在保存…' : '保存')}</SettingsButton></SettingsActions>
+  </form><LyricSourcesSettings setting={sources} host={host} onSaved={setSources} onlineEnabled={Boolean(resource?.setting.value.onlineEnabled ?? true)} /></div>;
 }

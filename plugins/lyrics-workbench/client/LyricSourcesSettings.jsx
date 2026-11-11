@@ -2,13 +2,15 @@ import React from 'react';
 import { Plus, Edit3, Trash2 } from 'lucide-react';
 import { t, DEFAULT_LYRIC_CHANNELS, MAX_LYRIC_SOURCES, normalizeLyricChannels,
   SettingsSection as Section, SettingsEditDialog, InfoTip, SettingsButton, SettingsActions, SettingsToggle,
-  SettingsInput, SettingsTextarea, useSettingsReadOnly, SelectControl, ALL_LANGUAGES, getLanguageLabel } from "@flaretune/plugin-sdk";
+  SettingsInput, SettingsTextarea, useSettingsReadOnly, SelectControl, useLocale } from "@flaretune/plugin-sdk";
+import { TRANSLATION_TARGETS, translationTargetLabel } from '../shared/translation-languages.js';
 import LyricSourceQuickTest from "./LyricSourceQuickTest.jsx";
 
 const inputClass = 'w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3.5 py-2.5 text-sm text-[var(--ink)] outline-none focus:border-[var(--accent)]';
 const cardClass = 'wallpaper-content-surface rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4 space-y-3';
 
-export default function LyricSourcesSettings({ setting, host, onSaved }) {
+export default function LyricSourcesSettings({ setting, host, onSaved, onlineEnabled = true }) {
+  const locale = useLocale();
   const current = setting || { value: DEFAULT_LYRIC_CHANNELS, revision: 0 };
   const value = React.useMemo(() => normalizeLyricChannels(current.value, { migrateLegacy: true }), [current.value]);
   const readOnly = useSettingsReadOnly();
@@ -129,10 +131,10 @@ export default function LyricSourcesSettings({ setting, host, onSaved }) {
         </label>)}
         <label className="block space-y-1.5 text-xs text-[var(--ink)]"><span className="font-semibold">{t('来源译文语言')}</span>
           <SelectControl aria-label={t('来源译文语言')} className={inputClass} value={editor.value.translationLanguage} disabled={locked} onChange={event => change('translationLanguage', event.target.value)}>
-            {ALL_LANGUAGES.filter(language => !['instrumental', 'other'].includes(language.code)).map(language => <option key={language.code} value={language.code}>{getLanguageLabel(language.code)}</option>)}
+            {TRANSLATION_TARGETS.map(code => <option key={code} value={code}>{translationTargetLabel(code, locale)}</option>)}
           </SelectControl>
         </label>
-        <LyricSourceQuickTest source={editor.value} host={host} busy={busy} onTesting={setTesting} />
+        <LyricSourceQuickTest source={editor.value} host={host} busy={busy || !onlineEnabled} onTesting={setTesting} />
         <SettingsActions className="pt-2 border-t border-[var(--line)]"><SettingsButton closeDialog disabled={locked}>{t('取消')}</SettingsButton><SettingsButton type="submit" variant="primary" disabled={locked}>{t(busy ? '正在保存…' : '保存')}</SettingsButton></SettingsActions>
       </form>
     </SettingsEditDialog>}

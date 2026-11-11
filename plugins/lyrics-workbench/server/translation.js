@@ -6,6 +6,7 @@ import { createLyricDocument, isSingableLineText } from "@flaretune/plugin-sdk/s
 import { computeHash, isNonLyricText } from "@flaretune/plugin-sdk/server/lyric-parsing";
 import {
   isFreshLyricAiPending,
+  projectLyricArtifact,
   lyricTextForHash,
   shouldAiCompleteLyrics,
 } from "@flaretune/plugin-sdk/server/lyric-workflow";
@@ -15,7 +16,7 @@ const AI_COMPLETION_DEADLINE_MS = 24_000;
 // ai.js treats shorter overrides as invalid, so stop before it could fall back to 90 seconds.
 const MIN_AI_REQUEST_BUDGET_MS = 5_000;
 const mixedBatchInstruction = (targetLanguage) => `整首歌的其他批次已确认需要 ${targetLanguage} 译文。为保持逐行译文完整，本批不得返回 notNeeded；请为每个 unitId 返回一项 translations。已经是目标语言的歌词可原样保留。`;
-const LANGUAGE_INSTRUCTION = `同时根据 languageSample 中真正演唱的歌词判断这首歌最主要的语言，不要根据歌名、歌手名或署名判断。请在原本的 JSON 对象中增加 songLanguage 字段，值只能是 zh、ja、en、ko、ru、es、fr、de、sv、vi、yue、it、th、pt 或 other。多语言时选歌词中占主导的语言；无法可靠判断时使用 other。即使返回 notNeeded，也必须提供 songLanguage。`;
+const LANGUAGE_INSTRUCTION = `同时根据 languageSample 中真正演唱的歌词判断这首歌最主要的语言，不要根据歌名、歌手名或署名判断。请在原本的 JSON 对象中增加 songLanguage 字段，值只能是 zh、ja、en、ko、ru、es、fr、de、sv、vi、yue、it、th、pt 或 other。多语言时选歌词中占主导的语言；无法可靠判断时使用 other。即使返回 notNeeded，也必须提供 songLanguage。目标译文语言与歌曲语种是两个概念；若返回 translationLanguage，须标识实际译文目标（可为 zh-Hant），但 songLanguage 仍只用上述歌曲语种枚举，不能用 zh-Hant。拉丁字母不能直接判定为英语，证据不足时返回 other。`;
 const CLEANUP_INSTRUCTION = `歌曲 title 和 artist 仅用于识别上下文，不能写进歌词。检查 cleanupUnits 中不属于实际演唱的整行内容，例如开头的歌名歌手资料、Lyrics by / Composed by 等制作署名、广告、乱码和无效正文。只把确定应整行删除的 index 放入 discardLineIndices；标题若也是实际唱出的歌词，应保留演唱位置的那一行。拿不准时保留。不得改写任何原文、增添歌词行、修改行时间戳或逐字时间点。若同时返回 translations，仍须与 units 一一对应；服务端会丢弃被标记整行及其译文。即使返回 notNeeded，也必须提供 discardLineIndices。`;
 
 export function getDailyLyricCompletionLimit(env) {
@@ -224,7 +225,7 @@ export async function runLyricAssetAiCompletion({
         || artifact.aiCompletion?.status !== 'pending'
         || artifact.aiCompletion.updatedAt !== startedAt) return { state: 'superseded' };
 
-      if (!force && !shouldAiCompleteLyrics(artifact.original, song)) {
+      if (!force && !shouldAiCompleteLyrics(artifact.original, song, { targetLanguage: access.config.targetLanguage || 'en' })) {
         return conditionallyFinish(store, song.id, startedAt, textHash, (current) => ({
           ...current,
           aiCompletion: null,
@@ -254,7 +255,7 @@ export async function runLyricAssetAiCompletion({
       );
       deadline.assertRemaining();
       if (!quotaReserved) throw new Error('AI_QUOTA_EXHAUSTED');
-      const targetLanguage = assistantConfig.targetLanguage || 'zh';
+      const targetLanguage = assistantConfig.targetLanguage || 'en';
       const referenceByUnitId = assistantConfig.referenceExistingTranslation
         && artifact.translation?.language === targetLanguage
         ? new Map(artifact.translation.lines.map((text, unitId) => [unitId, text]))
@@ -304,12 +305,12 @@ export async function runLyricAssetAiCompletion({
         const parseResponse = (response) => {
           if (firstAnalysis) {
             const parsed = parseLanguageAwareTranslationResponse(response, batch.units,
-              { targetLanguage, allowedCleanupIndices });
+              { targetLanguage, allowedCleanupIndices, allowUnchanged: requireComplete });
             inferredLanguage = detectLanguage ? parsed.language : null;
             parsed.discardLineIndices.forEach((index) => suggestedCleanup.add(index));
             return parsed.translations;
           }
-          return parseTranslationResponse(response, batch.units, { targetLanguage });
+          return parseTranslationResponse(response, batch.units, { targetLanguage, allowUnchanged: requireComplete });
         };
         const request = async (requestMessages) => {
           const remainingMs = deadline.remainingMs();
@@ -342,7 +343,7 @@ export async function runLyricAssetAiCompletion({
       const compactJsonBatches = (assistantConfig.source || assistantConfig.provider) === 'deepseek'
         && ['deepseek-flash', 'deepseek-v4-pro'].includes(assistantConfig.model);
       const batches = buildTranslationBatches(units, song.title, song.artist,
-        { targetLanguage, referenceByUnitId, ...(compactJsonBatches ? { maxUnits: 16 } : {}) });
+        { targetLanguage, referenceByUnitId, ...(compactJsonBatches ? { maxUnits: 20 } : {}) });
       if (!translateLyrics) {
         if (detectLanguage || cleanDirtyLyrics) {
           await askForBatch(batches[0], false, true, true);
@@ -381,6 +382,7 @@ export async function runLyricAssetAiCompletion({
       const finished = await conditionallyFinish(store, song.id, startedAt, textHash, (current) => applySuggestedCleanup({
         ...current, translation: {
           source: 'ai',
+          kind: 'ai',
           originalTextHash: textHash,
           lines,
           language: targetLanguage,
@@ -416,7 +418,9 @@ export async function beginLyricAssetAiCompletion({
     context: deps.consumerContext, signal: deps.signal, deps });
   db = access.db;
   store = guardLyricsStore(store, access.client.assertCurrent);
-  const read = await store.get(song.id);
+  // Internal source adapters may reuse their already authorized snapshot. The
+  // pending write below still CAS-checks its ETag before any AI work starts.
+  const read = deps.initialRead || await store.get(song.id);
   const current = deps.checkCurrent ? deps.checkCurrent(read) : read;
   if (current.state !== 'found' || current.artifact.status !== 'ready') {
     return { state: 'missing', task: null };
@@ -425,27 +429,23 @@ export async function beginLyricAssetAiCompletion({
     const resolved = await resolveLegacyLyricCleanup(store, song, current, deps.now || Date.now);
     return { state: 'already_cleaned', artifact: resolved.artifact, etag: resolved.etag, task: null };
   }
-  if (!force && !shouldAiCompleteLyrics(current.artifact.original, song)) {
+  if (!force && !shouldAiCompleteLyrics(current.artifact.original, song, { targetLanguage: targetLanguage || access.config.targetLanguage || 'zh' })) {
     return { state: 'not_needed', artifact: current.artifact, etag: current.etag, task: null };
   }
   const now = (deps.now || Date.now)();
   if (isFreshLyricAiPending(current.artifact.aiCompletion, now)) {
     return { state: 'pending', artifact: current.artifact, etag: current.etag, task: null };
   }
-  if (!force && current.artifact.translation && (!targetLanguage
-    || (current.artifact.translation.language || 'zh') === targetLanguage)) {
+  const activeLayer = projectLyricArtifact(current.artifact, { song,
+    targetLanguage: targetLanguage || access.config.targetLanguage || 'en' })?.translation;
+  if (!force && activeLayer) {
     return { state: 'already_translated', artifact: current.artifact, etag: current.etag, task: null };
   }
 
   const startedAt = new Date(now).toISOString();
   const existingTranslation = current.artifact.translation;
-  const existingLanguage = existingTranslation?.language
-    || (existingTranslation?.source === 'ai' ? 'zh' : null);
-  const staleTranslation = Boolean(existingTranslation && targetLanguage
-    && (existingLanguage || 'zh') !== targetLanguage);
   const pending = {
     ...current.artifact,
-    ...(staleTranslation ? { translation: null } : {}),
     aiCompletion: { status: 'pending', updatedAt: startedAt },
     updatedAt: startedAt,
   };
