@@ -1,6 +1,6 @@
 import React from 'react';
 import { t, SettingsSection, SettingsActions, SettingsButton, SettingsToggle, SettingsInput,
-  SettingsTextarea, SelectControl, InfoTip, ALL_LANGUAGES } from "@flaretune/plugin-sdk";
+  SettingsTextarea, SelectControl, InfoTip, ALL_LANGUAGES, ServiceModelSettings } from "@flaretune/plugin-sdk";
 import LyricSourcesSettings from "./LyricSourcesSettings.jsx";
 
 const FLAGS = [
@@ -46,7 +46,7 @@ export default function LyricsSettings({ host }) {
   };
   if (!draft) return <div role={error ? 'alert' : 'status'}>{error ? t(error) : t('正在加载…')}
     {error && <SettingsButton onClick={() => void load()}>{t('重试')}</SettingsButton>}</div>;
-  return <div className="space-y-5"><form className="space-y-5" onSubmit={event => void save(event)}>
+  return <div className="space-y-5"><ServiceModelSettings host={host} /><form className="space-y-5" onSubmit={event => void save(event)}>
     {error && <p role="alert">{t(error)}</p>}
     <SettingsSection title={t('歌词 AI')}>
       <div className="grid gap-4 sm:grid-cols-2">
@@ -57,11 +57,6 @@ export default function LyricsSettings({ host }) {
             {ALL_LANGUAGES.filter(({ code }) => !['instrumental', 'other'].includes(code)).map(({ code, label }) =>
               <option key={code} value={code}>{t(label)}</option>)}
           </SelectControl>
-        </label>
-        <label className="space-y-2"><span>{t('温度（0～2）')}</span>
-          <SettingsInput type="range" min="0" max="2" step="0.1" aria-label={t('温度（0～2）')}
-            disabled={busy} value={draft.temperature} onChange={event => patch('temperature', Number(event.target.value))} />
-          <output>{Number(draft.temperature).toFixed(1)}</output>
         </label>
       </div>
       <div className="space-y-3 mt-5">{FLAGS.map(([key, label]) => <SettingsToggle key={key} label={t(label)}

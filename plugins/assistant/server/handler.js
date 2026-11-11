@@ -1,6 +1,7 @@
 import { getPublicAiErrorCode } from "@flaretune/plugin-service/ai-gateway/server/ai.js";
 import { createAiGatewayClient } from "@flaretune/plugin-service/ai-gateway/server/client.js";
-import { createPluginServiceLease } from "@flaretune/plugin-sdk/server/service-leases";
+import { createPluginServiceLease, createPluginOperationLease } from "@flaretune/plugin-sdk/server/service-leases";
+import { handleAssistantModelRoute } from './modelRoutes.js';
 import { createPluginContext } from "@flaretune/plugin-sdk/server/plugin-context";
 import { createAssistantBindingBudget } from "./bindingBudget.js";
 import { pluginRegistry } from "@flaretune/plugin-sdk/server/plugin-registry";
@@ -524,6 +525,8 @@ export async function chatWithAssistantTools({ chat, messages, config, env, db, 
     const definitions = memoryAllowed ? getAssistantToolDefinitions()
       : getAssistantToolDefinitions().filter((tool) => tool.function.name !== assistantMemoryTool.name);
     const hasImageHistory = messages.some(message => message.privateImageIds?.length);
+    // db is the saved-selection binding: each policy query atomically checks
+    // the session, plugin epochs, consumer revision and provider snapshot.
     const prepared = hasImageHistory ? await prepareAssistantImages(db, env.MEDIA_BUCKET, accountId, messages, config) : null;
     if (prepared && round === 0 && (prepared.omitted || prepared.disabled)) emit({ type: 'image_notice', message: '部分历史图片未发送给模型，需要参考时请重新附图。' });
     if (isCancelled()) throw new Error('AI_STREAM_CANCELLED');
@@ -714,7 +717,8 @@ export async function handleLocalAssistantRoute(request, url, db, headers = {}, 
     if (!digest || request.headers.get('X-FlareTune-Plugin-Build') !== digest) return json({ error: 'PLUGIN_BUILD_MISMATCH' }, 409, headers);
     const lease = await createPluginServiceLease({ env, session, consumerId: 'assistant', providerId: 'ai-gateway',
       consumerContext: context, registry });
-    const authorize = () => lease.assertCurrent();
+    let assertCurrent = lease.assertCurrent;
+    const authorize = () => assertCurrent();
     db = lease.guardedDb(db);
     if (path === '/api/ai/playlist-delete' && request.method === 'POST') {
       const body = await parseBody(request);
@@ -761,9 +765,18 @@ export async function handleLocalAssistantRoute(request, url, db, headers = {}, 
     }
     if (path === '/api/ai/bootstrap' && request.method === 'GET') {
       const assistant = await readMusicAssistantConfig(db);
+      let imageInput;
+      try {
+        const gateway = await createAiGatewayClient({ env, session, consumerId: 'assistant', consumerContext: context,
+          serviceLease: lease, registry, configuration: { slot: 'ai-model' } });
+        imageInput = await assistantImagePolicy(gateway.guardedDb(db), gateway.config);
+      } catch (error) {
+        if (error instanceof AuthError && error.status === 403) throw error;
+        imageInput = { enabled: false, reason: error?.code || error?.message || 'AI_CONFIG_INVALID' };
+      }
       return json({ ok: true, authenticated: true,
         user: { accountId, username: account.username, displayName: account.displayName, role: account.role },
-        assistant: exposeAssistantBootstrap(assistant), imageInput: await assistantImagePolicy(db), systemPolicyVersion: assistant.revision }, 200, headers);
+        assistant: exposeAssistantBootstrap(assistant), imageInput, systemPolicyVersion: assistant.revision }, 200, headers);
     }
     if (path === '/api/ai/thread' && request.method === 'GET') {
       await recoverStaleTurns(db, accountId, now());
@@ -806,10 +819,6 @@ export async function handleLocalAssistantRoute(request, url, db, headers = {}, 
         || (body.context !== undefined && (!body.context || typeof body.context !== 'object'
           || Array.isArray(body.context)))) return fail('invalid_input', headers);
       const imageIds = validateImageIds(body.image_ids ?? []);
-      if (imageIds.length) {
-        if (!(await assistantImagePolicy(db)).enabled) return json({ error: 'assistant_images_disabled' }, 403, headers);
-        await validateOwnChatImages(db, accountId, imageIds);
-      }
       let assistant;
       try { assistant = await readMusicAssistantConfig(db); }
       catch { return fail('ai_configuration_unavailable', headers); }
@@ -817,16 +826,23 @@ export async function handleLocalAssistantRoute(request, url, db, headers = {}, 
       try {
         gateway = await createAiGatewayClient({ env, session, consumerId: 'assistant', feature: 'assistant',
           consumerContext: context, serviceLease: lease, registry, signal: request.signal,
-          legacyConfig: { provider: assistant.provider, model: assistant.model, temperature: assistant.temperature } },
+          configuration: { slot: 'ai-model' } },
           chat ? { chat, pollIntervalMs: 0 } : { pollIntervalMs: 0 });
       } catch (error) {
         if (error instanceof AuthError) throw error;
-        if (error?.message === 'AI_PROVIDER_UNCONFIGURED') return fail('ai_provider_unconfigured', headers);
+        const code = error?.code || error?.message;
+        if (['PLUGIN_UPDATE_REQUIRED', 'AI_PROVIDER_UNCONFIGURED', 'AI_PROVIDER_MISSING', 'AI_CONFIG_INVALID'].includes(code)) return fail(code, headers);
         return fail('ai_configuration_unavailable', headers);
       }
-      const aiEnv = { MEDIA_BUCKET: env.MEDIA_BUCKET, DB: db };
+      assertCurrent = gateway.assertCurrent;
+      const aiDb = gateway.guardedDb(db);
+      if (imageIds.length) {
+        if (!(await assistantImagePolicy(aiDb, gateway.config)).enabled) return json({ error: 'assistant_images_disabled' }, 403, headers);
+        await validateOwnChatImages(aiDb, accountId, imageIds);
+      }
+      const aiEnv = { MEDIA_BUCKET: env.MEDIA_BUCKET, DB: aiDb };
       const gatewayChat = (messages, tools, config, _unusedEnv, options) => gateway.chat(messages, tools,
-        { temperature: config.temperature, enableThinking: config.enableThinking }, options);
+        { enableThinking: config.enableThinking }, options);
       const memory = await readAssistantMemories(db, accountId, { forAssistant: true });
       const completedOperations = new Map();
       if (body.continue_turn_id) {
@@ -844,7 +860,7 @@ export async function handleLocalAssistantRoute(request, url, db, headers = {}, 
           }
         }
       }
-      const reserved = await reserveTurn(db, accountId, body.client_message_id,
+      const reserved = await reserveTurn(aiDb, accountId, body.client_message_id,
         body.revision, body.message.trim(), now(), imageIds);
       if (reserved.duplicate || reserved.conflict) {
         return threadConflict(reserved.thread, headers, reserved.duplicate);
@@ -862,7 +878,7 @@ export async function handleLocalAssistantRoute(request, url, db, headers = {}, 
             ...(processEntries.length > 0 ? { processEntries } : {}),
             ...(savedContext ? { savedContext } : {}),
             ...(config.enableThinking ? { thinkingRequested: true } : {}) } : null;
-        const thread = await completeTurn(db, accountId, reserved.turnId,
+        const thread = await completeTurn(aiDb, accountId, reserved.turnId,
           reserved.reservedRevision, content, extra, now());
         if (!thread) throw new Error('THREAD_CONFLICT');
         return thread;
@@ -875,10 +891,10 @@ export async function handleLocalAssistantRoute(request, url, db, headers = {}, 
         run: async (emit, isCancelled, signal, saveContext) => {
           if (reserved.thread.messages.slice(0, -MAX_CONTEXT_MESSAGES).some(message => message.images?.length)) emit({ type: 'image_notice', message: '较早图片已超出上下文窗口，需要参考时请重新附图。' });
           const result = await chatWithAssistantTools({ session,
-            chat: gatewayChat, messages, db, accountId, env: aiEnv, config, memoryAllowed: memory.enabled, authorize,
+            chat: gatewayChat, messages, db: aiDb, accountId, env: aiEnv, config, memoryAllowed: memory.enabled, authorize,
             live, clientMessageId: body.client_message_id,
             emit, isCancelled, signal, saveContext, completedOperations,
-            toolDb: guardedAssistantToolDb(db, accountId, reserved.turnId, reserved.reservedRevision),
+            toolDb: guardedAssistantToolDb(aiDb, accountId, reserved.turnId, reserved.reservedRevision),
           });
           if (isCancelled()) throw new Error('AI_STREAM_CANCELLED');
           await checkpoint.close();
@@ -907,8 +923,10 @@ export function createAssistantHandler(env, session, options = {}) {
     if (scope === 'admin') {
       try {
         await context.requireRoles(['admin']);
-        const lease = await createPluginServiceLease({ env, session, consumerId: 'assistant', providerId: 'ai-gateway',
-          consumerContext: context, registry: options.registry || pluginRegistry, admin: true });
+        const registry = options.registry || pluginRegistry;
+        const modelResponse = await handleAssistantModelRoute({ request, path, env, session, context, registry, json });
+        if (modelResponse) return modelResponse;
+        const lease = await createPluginOperationLease({ env, session, pluginId: 'assistant', context, registry, admin: true });
         const db = lease.guardedDb(env.DB);
         if (['/config', '/settings'].includes(path) && request.method === 'GET') {
           const assistant = await db.prepare(`SELECT name,description,avatar_icon,persona,welcome_message,
@@ -934,7 +952,7 @@ export function createAssistantHandler(env, session, options = {}) {
         }
         return json({ error: 'not_found' }, 404);
       } catch (error) {
-        return json({ error: typeof error?.code === 'string' ? error.code : 'service_unavailable' }, Number.isInteger(error?.status) ? error.status : 503);
+        return json({ error: typeof error?.code === 'string' ? error.code : error?.message || 'service_unavailable' }, Number.isInteger(error?.status) ? error.status : 503);
       }
     }
     if (scope !== 'account') return json({ error: 'forbidden' }, 403);

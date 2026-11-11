@@ -1,7 +1,7 @@
 {
   "id": "assistant",
-  "version": "0.1.0",
-  "hostApiVersion": 2,
+  "version": "0.2.0",
+  "hostApiVersion": 3,
   "apiVersion": 1,
   "dataVersion": 0,
   "name": "助手",
@@ -106,9 +106,11 @@
   },
   "dependencies": {
     "ai-gateway": {
-      "apiVersion": 1
+      "apiVersion": 1,
+      "version": "^0.2.0"
     }
   },
+  "serviceConfigurations": { "ai-gateway": ["ai-model"] },
   "capabilityRoles": [
     "admin",
     "member"

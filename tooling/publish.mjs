@@ -110,7 +110,7 @@ export async function createArtifact(id, { root = repositoryRoot } = {}) {
   const manifestPath = resolve(packageRoot, 'manifest.json');
   if ((await lstat(manifestPath)).isSymbolicLink()) fail('PUBLISH_SYMLINK_UNSUPPORTED');
   const manifest = canonical(JSON.parse(await readFile(manifestPath, 'utf8')));
-  if (manifest.id !== id || !versionPattern.test(manifest.version) || manifest.hostApiVersion !== 2) fail('PUBLISH_MANIFEST_INVALID');
+  if (manifest.id !== id || !versionPattern.test(manifest.version) || ![2, 3].includes(manifest.hostApiVersion)) fail('PUBLISH_MANIFEST_INVALID');
   const sources = await sourcePaths(root, packageRoot);
   const entries = Object.fromEntries(['client', 'server'].filter(kind => sources.includes(`${kind}/index.${kind === 'client' ? 'jsx' : 'js'}`))
     .map(kind => [kind, `${kind}/index.js`]));
@@ -158,7 +158,11 @@ export async function createArtifact(id, { root = repositoryRoot } = {}) {
           if (side !== 'server' || importer.startsWith('shared/') || !sourceSet.has(path) || !path.startsWith('server/')) fail('PUBLISH_ASSET_INVALID');
           return { path: '/__flaretune_asset__/' + path, external: true };
         });
-        bundler.onResolve({ filter: /^(?:\.|[A-Za-z]:[\\/]|\/)/ }, args => {
+        bundler.onResolve({ filter: /^@flaretune\/plugin-service\// }, args => {
+            if (args.path.split('/').includes('_private')) fail('PUBLISH_PRIVATE_SERVICE_IMPORT');
+            return { path: args.path, external: true };
+          });
+          bundler.onResolve({ filter: /^(?:\.|[A-Za-z]:[\\/]|\/)/ }, args => {
           const resolved = resolve(args.resolveDir, args.path);
           const packageRelative = slash(relative(packageRoot, resolved));
           const vendorRelative = relative(resolve(root, 'node_modules'), resolved);
@@ -208,7 +212,7 @@ export async function createArtifact(id, { root = repositoryRoot } = {}) {
     assets[path] = { encoding: 'base64', data: bytes.toString('base64'), size: bytes.length, sha256: sha256(bytes) };
   }
   files['shared/NOTICE.json'] = jsonBytes(await dependencyNotices(root, metafile, wasmPaths.length > 0)).toString('utf8');
-  const exports = Object.fromEntries(sources.filter(path => sourceExtension.test(path))
+  const exports = Object.fromEntries(sources.filter(path => sourceExtension.test(path) && !path.split('/').includes('_private'))
     .map(path => [path, moduleExtension.test(path) ? path.replace(moduleExtension, '.js') : path]));
   for (const value of [...Object.values(entries), ...Object.values(exports)]) if (!Object.hasOwn(files, value)) fail('PUBLISH_OUTPUT_INVALID');
   const artifact = canonical({ schemaVersion: 2, manifest, entries, exports, files, assets });

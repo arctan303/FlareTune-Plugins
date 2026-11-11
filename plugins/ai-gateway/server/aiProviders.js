@@ -72,10 +72,10 @@ export async function updateAiProvider(db, actor, id, input, expectedRevision, e
   return providerDto(await updateAiProfile(db, actor, id, connectionPayload(input, previous), expectedRevision, env,
     Date.now(), { connectionOnly: true }));
 }
-export async function deleteAiProvider(db, actor, id, expectedRevision) {
+export async function deleteAiProvider(db, actor, id, expectedRevision, options) {
   await requireActiveAdmin(db, actor);
   await requireFeatureModels(db);
-  return deleteAiProfile(db, actor, id, expectedRevision);
+  return deleteAiProfile(db, actor, id, expectedRevision, Date.now(), options);
 }
 export async function listAiProviderModels(db, actor, input, env) {
   await requireActiveAdmin(db, actor);

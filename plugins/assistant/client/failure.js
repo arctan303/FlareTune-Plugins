@@ -1,7 +1,8 @@
 import { assistantFailureReason } from "../shared/assistantFailure.js";
+import { modelErrorMessage } from './modelError.js';
 
 export function assistantFailureMessage(error) {
-  return assistantFailureReason(error?.code) || error?.message || '助手连接失败，请稍后重试。';
+  return modelErrorMessage(error) || assistantFailureReason(error?.code) || error?.message || '助手连接失败，请稍后重试。';
 }
 
 export function withAssistantFailure(messages, failure) {

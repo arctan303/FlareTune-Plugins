@@ -1,7 +1,8 @@
-import { getAIAssistantConfig } from "@flaretune/plugin-service/ai-gateway/server/ai.js";
 import { DEFAULT_LYRIC_AI_CONFIG, lyricAiProcessingKey, normalizeLyricAiConfig } from "./policy.js";
 
-export async function loadLyricAiConfig(db, { getLegacy = getAIAssistantConfig } = {}) {
+const readLegacyLyricConfig = async db => db?.prepare
+  ? await db.prepare("SELECT provider,model,temperature,system_prompt FROM AI_Assistants WHERE id='lyric_translator'").first() : null;
+export async function loadLyricAiConfig(db, { getLegacy = readLegacyLyricConfig } = {}) {
   const row = db?.prepare
     ? await db.prepare("SELECT value_json FROM instance_settings WHERE key = 'lyrics.ai'").first()
     : null;
@@ -14,9 +15,7 @@ export async function loadLyricAiConfig(db, { getLegacy = getAIAssistantConfig }
   const legacy = await getLegacy(db, 'lyric_translator');
   return {
     ...DEFAULT_LYRIC_AI_CONFIG,
-    provider: legacy.provider,
-    model: legacy.model,
-    temperature: legacy.temperature ?? 0.2,
+    ...(legacy ? { provider: legacy.provider, model: legacy.model, temperature: legacy.temperature ?? 0.2 } : {}),
     styleRules: DEFAULT_LYRIC_AI_CONFIG.styleRules,
     systemPrompt: DEFAULT_LYRIC_AI_CONFIG.styleRules,
   };

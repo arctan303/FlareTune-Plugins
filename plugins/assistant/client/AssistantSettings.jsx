@@ -1,6 +1,6 @@
 import React from 'react';
 import { t, SettingsSection, SettingsEditDialog, SettingsSkeleton, SettingsActions, SettingsButton,
-  SettingsToggle, SettingsInput, SettingsTextarea, useSettingsResource, useSettingsReadOnly } from "@flaretune/plugin-sdk";
+  SettingsToggle, SettingsInput, SettingsTextarea, ServiceModelSettings, useSettingsResource, useSettingsReadOnly } from "@flaretune/plugin-sdk";
 
 const inputClass = 'w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3.5 py-2.5 text-sm text-[var(--ink)] outline-none focus:border-[var(--accent)]';
 const fields = [['name', '助手名称', 80], ['avatar_icon', '图标标识', 80], ['welcome_message', '欢迎语', 1000], ['description', '描述', 500]];
@@ -55,6 +55,7 @@ export default function AssistantSettings({ host }) {
     {loading && <SettingsSkeleton cards={2} rows={2} />}
   </div>;
   return <div className="space-y-5">
+    <ServiceModelSettings host={host} />
     {error && !editing && <p role="alert">{error}</p>}
     <SettingsSection title={t('助手')} action={<SettingsButton onClick={open} disabled={readOnly || busy}>{t('编辑')}</SettingsButton>}>
       <strong className="text-sm">{data.assistant.name}</strong>
@@ -74,9 +75,6 @@ export default function AssistantSettings({ host }) {
             {max <= 80 ? <SettingsInput className={inputClass} maxLength={max} value={draft[key] || ''} onChange={patchField(key)} required />
               : <SettingsTextarea className={`${inputClass} min-h-20`} maxLength={max} value={draft[key] || ''} onChange={patchField(key)} required />}
           </label>)}
-          <label className="block space-y-1.5 text-sm">{t('温度（0～2）')}
-            <SettingsInput className={inputClass} type="number" min="0" max="2" step="0.1" value={draft.temperature} onChange={patchField('temperature')} required />
-          </label>
         </div> : <div className="space-y-4">
           {[['persona', '人设', 12000], ['system_rules', '系统准则', 24000]].map(([key, label, max]) => <div key={key} className="space-y-1.5">
             <div className="flex items-center justify-between gap-3"><label htmlFor={`assistant-${key}`}>{t(label)}</label>

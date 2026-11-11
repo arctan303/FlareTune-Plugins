@@ -4,11 +4,16 @@ import { getAdminSettings, updateAdminSetting } from "./settings.js";
 import { InstanceAdminError } from "@flaretune/plugin-sdk/server/admin-common";
 import { readBoundedJson } from "@flaretune/plugin-sdk/server/http-security";
 import { testLyricSource } from "./sourceTest.js";
+import { handleLyricsModelRoute } from './modelRoutes.js';
 
 const memberAction = (path, method) => method === 'GET'
   || method === 'POST' && ['/candidates/inspect', '/ai-completion'].some(suffix => path.endsWith(suffix));
 export function createLyricsWorkbenchHandler(env, session, { executionContext, dependencies = {}, registry } = {}) {
   return async ({ request, path, scope, context, json }) => {
+    if (scope === 'admin' && ['/model', '/model/models', '/model/initialize'].includes(path)) {
+      try { return await handleLyricsModelRoute({ request, path, env, session, context, registry, json }); }
+      catch (error) { return json({ error: error?.code || error?.message || 'service_unavailable' }, error?.status || 503); }
+    }
     if (scope === 'admin' && ['/settings', '/sources-settings', '/source-test'].includes(path)) {
       await context.requireRoles(['admin']);
       const lease = await createPluginOperationLease({ env, session, pluginId: 'lyrics-workbench', context, registry, admin: true });

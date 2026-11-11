@@ -204,3 +204,26 @@ test('the locked YouTube worker vendor initializes before derived live-chat clas
   assert.equal(typeof vendor.Innertube, 'function');
   assert.equal(typeof vendor.YTNodes.LiveChat, 'function');
 });
+
+test('SDK3 packages retain schema2 and keep internal resolvers outside public exports', async t => {
+  const { root, base } = await fixture(t);
+  const manifestPath = resolve(base, 'manifest.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  manifest.hostApiVersion = 3;
+  await writeFile(manifestPath, JSON.stringify(manifest));
+  await mkdir(resolve(base, 'server/_private'), { recursive: true });
+  await writeFile(resolve(base, 'server/_private/value.js'), 'export const internalValue = 93;');
+  await writeFile(resolve(base, 'server/value.js'), "import { internalValue } from './_private/value.js'; export const value = internalValue;");
+  const { artifact } = await createArtifact('sample', { root });
+  assert.equal(artifact.schemaVersion, 2);
+  assert.equal(artifact.manifest.hostApiVersion, 3);
+  assert.ok(Object.hasOwn(artifact.files, 'server/_private/value.js'));
+  assert.ok(Object.keys(artifact.exports).every(key => !key.split('/').includes('_private')));
+  assert.ok(Object.values(artifact.exports).every(path => !path.split('/').includes('_private')));
+});
+
+test('consumer imports cannot name a provider private credential module', async t => {
+  const { root, base } = await fixture(t);
+  await writeFile(resolve(base, 'server/value.js'), "import { secret } from '@flaretune/plugin-service/provider/server/_private/secrets.js'; export const value = secret;");
+  await assert.rejects(createArtifact('sample', { root }));
+});

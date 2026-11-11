@@ -1,5 +1,3 @@
-import { resolveAIConfig } from "@flaretune/plugin-service/ai-gateway/server/ai.js";
-
 const XIAOA_ID = 'xiaoa';
 
 const mapAssistantConfig = (row) => ({
@@ -27,13 +25,6 @@ const assertConfigured = (assistant) => {
     || assistant.temperature > 2
     || !Number.isInteger(assistant.revision)
     || assistant.revision < 1) {
-    throw new Error('assistant_configuration_unavailable');
-  }
-  try {
-    const modelConfig = resolveAIConfig(assistant);
-    assistant.provider = modelConfig.provider;
-    assistant.model = modelConfig.model;
-  } catch {
     throw new Error('assistant_configuration_unavailable');
   }
   return assistant;

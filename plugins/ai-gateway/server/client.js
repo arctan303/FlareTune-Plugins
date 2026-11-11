@@ -1,6 +1,7 @@
-import { createPluginServiceLease, isPluginServiceLease } from "@flaretune/plugin-sdk/server/service-leases";
+import { createPluginServiceLease, isPluginServiceLeaseForSession } from "@flaretune/plugin-sdk/server/service-leases";
 import { pluginFail } from "@flaretune/plugin-sdk/server/plugin-common";
-import { resolveAiFeature } from "./aiProfiles.js";
+import { resolveAiFeature } from "./_private/profiles.js";
+import { resolveSavedConfiguration } from "./_private/consumer-state.js";
 import { askAI, chatAI, resolveAIConfig } from "./ai.js";
 import { aiConnection } from "./aiTransport.js";
 import { effectiveAiBaseUrl, sourceFromProvider, legacyProtocol, validateAiBaseUrl } from "../shared/aiProtocols.js";
@@ -26,17 +27,31 @@ async function legacyEnvironment(db, config, env) {
 
 // No consumer receives the credentials-bearing resolved env. It remains inside
 // this capability and is used only by the protocol executor owned by Gateway.
-export async function createAiGatewayClient({ env, session, consumerId, feature,
-  consumerContext, serviceLease, subsonicPrincipal, registry, signal, legacyConfig = {} }, dependencies = {}) {
-  if (features[consumerId] !== feature) pluginFail('PLUGIN_SERVICE_FEATURE_FORBIDDEN', 403);
-  if (serviceLease && (!isPluginServiceLease(serviceLease) || serviceLease.consumer.id !== consumerId
-    || serviceLease.provider.id !== 'ai-gateway')) pluginFail('PLUGIN_SERVICE_CONTEXT_MISMATCH', 403);
-  const lease = serviceLease || (subsonicPrincipal
-    ? await (await import("@flaretune/plugin-sdk/server/subsonic-principal")).createSubsonicPluginServiceLease({ env, principal: subsonicPrincipal, consumerId, providerId: 'ai-gateway', registry })
-    : await createPluginServiceLease({ env, session, consumerId, providerId: 'ai-gateway', consumerContext, registry }));
-  const resolved = await resolveAiFeature(lease.guardedDb(env.DB), feature, env, legacyConfig);
-  const privateConfig = resolved?.config || legacyConfig;
-  const privateEnv = resolved?.env || await legacyEnvironment(lease.guardedDb(env.DB), privateConfig, env);
+export async function createAiGatewayClient(input, dependencies = {}) {
+  const { env, session, consumerId, feature, consumerContext, serviceLease, subsonicPrincipal,
+    registry, signal, legacyConfig = {}, configuration } = input;
+  let lease, privateConfig, privateEnv;
+  if (configuration) {
+    const resolved = await resolveSavedConfiguration(input);
+    lease = resolved.authority; privateConfig = resolved.config; privateEnv = resolved.env;
+  } else {
+    // The bounded API1 adapter is the only path that knows historical features.
+    if (features[consumerId] !== feature) pluginFail('PLUGIN_SERVICE_FEATURE_FORBIDDEN', 403);
+    if (serviceLease) {
+      const valid = subsonicPrincipal
+        ? (await import('@flaretune/plugin-sdk/server/subsonic-principal')).isSubsonicPluginServiceLeaseForPrincipal(serviceLease, subsonicPrincipal, env, registry)
+        : isPluginServiceLeaseForSession(serviceLease, session, env.DB, registry);
+      if (!valid || serviceLease.consumer.id !== consumerId || serviceLease.provider.id !== 'ai-gateway') pluginFail('PLUGIN_SERVICE_CONTEXT_MISMATCH', 403);
+      lease = serviceLease;
+    } else {
+      lease = subsonicPrincipal
+        ? await (await import('@flaretune/plugin-sdk/server/subsonic-principal')).createSubsonicPluginServiceLease({ env, principal: subsonicPrincipal, consumerId, providerId: 'ai-gateway', registry })
+        : await createPluginServiceLease({ env, session, consumerId, providerId: 'ai-gateway', consumerContext, registry });
+    }
+    const resolved = await resolveAiFeature(lease.guardedDb(env.DB), feature, env, legacyConfig);
+    privateConfig = resolved?.config || legacyConfig;
+    privateEnv = resolved?.env || await legacyEnvironment(lease.guardedDb(env.DB), privateConfig, env);
+  }
   await lease.assertCurrent();
   const validated = resolveAIConfig(privateConfig);
   try { aiConnection(validated, privateEnv); }
@@ -46,14 +61,15 @@ export async function createAiGatewayClient({ env, session, consumerId, feature,
   }
   const config = freeze(clone(Object.fromEntries([
     'provider', 'source', 'protocol', 'model', 'temperature', 'generationOptions', 'supportsImages',
-    'profileId', 'profileRevision', 'featureRevision', 'exactModel',
+    'profileId', 'profileRevision', 'featureRevision', 'configurationRevision', 'providerBinding', 'exactModel',
   ].filter(key => privateConfig[key] !== undefined).map(key => [key, privateConfig[key]]))));
   const source = config.source || sourceFromProvider(config.provider);
   const protocol = config.protocol || legacyProtocol(config.provider);
   const prefix = { deepseek: 'DEEPSEEK', openai: 'OPENAI', gemini: 'GEMINI', anthropic: 'ANTHROPIC', custom: 'OPENAI' }[source];
   const baseUrl = effectiveAiBaseUrl(source, privateEnv.AI_PROFILE_BASE_URL || privateEnv[`${prefix}_BASE_URL`] || '', protocol);
   const identity = JSON.stringify({ profile: config.profileId || config.provider, revision: config.profileRevision ?? null,
-    source, protocol, model: config.model, baseUrl });
+    source, protocol, model: config.model, baseUrl,
+    ...(configuration ? { configurationRevision: config.configurationRevision, providerBinding: config.providerBinding } : {}) });
   const activeDrains = new Set();
 
   async function execute(kind, messages, tools, overrides = {}, options = {}) {
@@ -118,9 +134,14 @@ export async function createAiGatewayClient({ env, session, consumerId, feature,
       await check();
       let result, executionError;
       try {
-        result = kind === 'ask'
-          ? await (dependencies.ask || askAI)(messages, { ...privateConfig, ...overrides }, privateEnv, forwarded)
-          : await (dependencies.chat || chatAI)(messages, tools, { ...privateConfig, ...overrides }, privateEnv, forwarded);
+        // Test executors are public callbacks and must never observe the private
+        // credential environment. Only Gateway's own transport receives it.
+        if (kind === 'ask') result = dependencies.ask
+          ? await dependencies.ask(messages, { ...config, ...overrides }, Object.freeze({}), forwarded)
+          : await askAI(messages, { ...privateConfig, ...overrides }, privateEnv, forwarded);
+        else result = dependencies.chat
+          ? await dependencies.chat(messages, tools, { ...config, ...overrides }, Object.freeze({}), forwarded)
+          : await chatAI(messages, tools, { ...privateConfig, ...overrides }, privateEnv, forwarded);
       } catch (error) { executionError = error; }
       startBatch?.();
       await callbacks;

@@ -20,6 +20,7 @@ test('Gateway settings show the existing key as configured and edit through thei
     modules: { '@flaretune/plugin-sdk': sdk, 'lucide-react': icons }, globals: { window: { confirm: () => true } } });
   let tree = view.render({ host });
   assert.match(text(tree), /Saved provider/); assert.match(text(tree), /密钥已配置/);
+  assert.doesNotMatch(text(tree), /功能使用方案|音乐助手|歌词 AI/);
   assert.equal(nodes(tree).some(node => node.type === 'input' && node.props.type === 'password'), false);
   nodes(tree).find(node => node.type === 'button' && text(node) === '添加供应商').props.onClick();
   tree = view.render({ host });

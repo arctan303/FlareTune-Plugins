@@ -1,3 +1,4 @@
+import { modelErrorMessage } from './modelError.js';
 export const LYRIC_OFFSET_MIN = -5000;
 export const LYRIC_OFFSET_MAX = 5000;
 export function clampLyricOffset(value) {
@@ -17,9 +18,12 @@ export function createLyricsWorkspaceApi(host) {
       throw new LyricsWorkspaceError('只有管理员可以修改共享歌词。', { status: 403, code: 'FORBIDDEN' });
     }
     if (['/ai-completion', '/draft-ai'].some(suffix => path.endsWith(suffix)) && !host.features.isAvailable('ai')) {
-      throw new LyricsWorkspaceError('歌词 AI 已关闭', { status: 409, code: 'PLUGIN_DEPENDENCY_UNAVAILABLE' });
+      const code = 'PLUGIN_DEPENDENCY_UNAVAILABLE';
+      throw new LyricsWorkspaceError(modelErrorMessage({ code }), { status: 409, code });
     }
-    const result = await host.request(path, { method, ...(body === undefined ? {} : { body }), query, signal });
+    let result;
+    try { result = await host.request(path, { method, ...(body === undefined ? {} : { body }), query, signal }); }
+    catch (error) { const message = modelErrorMessage(error); if (message) throw new LyricsWorkspaceError(message, { status: error.status, code: error.code, data: error.data }); throw error; }
     if (!host.isCurrent()) throw inactive();
     return result;
   };

@@ -36,7 +36,7 @@ import { storedLyricTranslationLanguage, isLyricSourceId } from "@flaretune/plug
 import { createPluginServiceLease } from "@flaretune/plugin-sdk/server/service-leases";
 import { AuthError } from "@flaretune/plugin-sdk/server/auth";
 import { pluginFail } from "@flaretune/plugin-sdk/server/plugin-common";
-import { guardLyricsStore } from "./aiAccess.js";
+import { createLyricsAiAccess, guardLyricsStore } from "./aiAccess.js";
 
 // Only the new account-gated workspace path is dispatched here. Origin and CSRF
 // are verified by the outer router before any mutation reaches this module.
@@ -179,6 +179,10 @@ function boundedInspection(inspected, headers) {
 }
 
 function knownFailure(error, headers) {
+  const modelError = error?.code || error?.message;
+  if (['PLUGIN_UPDATE_REQUIRED', 'AI_PROVIDER_UNCONFIGURED', 'AI_PROVIDER_MISSING', 'AI_CONFIG_INVALID'].includes(modelError)) {
+    return failure(503, modelError, modelError, headers);
+  }
   if (error?.message === 'AI_ASSISTANT_CONFIG_UNAVAILABLE') {
     return failure(503, 'LYRIC_AI_CONFIG_UNAVAILABLE', 'Lyric AI settings unavailable', headers);
   }
@@ -291,11 +295,14 @@ export async function handleLyricsWorkbenchRoute(request, url, db, headers = {},
     const completionEnabled = settings.completionEnabled && gatewayAvailable;
     const aiDeps = { ...deps.aiDeps, lyricConfig: settings, ...(aiLease ? { aiLease } : {}) };
     if (aiLease && ['ai-completion', 'draft-ai'].includes(action)) {
-      deps.useAiLease?.(aiLease);
+      const access = await createLyricsAiAccess({ env, db, session, context: deps.context,
+        signal: request.signal, deps: aiDeps });
+      aiDeps.aiAccess = access;
+      deps.useAiLease?.(access.client);
       // This service lease preserves the operation's admin/member scope and
       // adds Gateway authority, so the shared I/O needs one combined gate.
       store = guardLyricsStore(guardExternalLyricStore(deps.store || lyricArtifactStoreForEnv(env), songId,
-        () => lyricSongStillExists(db, songId, deps)), aiLease.assertCurrent);
+        () => lyricSongStillExists(db, songId, deps)), access.client.assertCurrent);
     }
     const dataOf = (read) => {
       const data = currentData(read, song, now(), targetLanguage, session.account.accountId);
