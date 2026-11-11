@@ -1,6 +1,6 @@
 {
   "id": "lyrics-workbench",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "hostApiVersion": 3,
   "apiVersion": 1,
   "dataVersion": 0,
@@ -130,6 +130,7 @@
       "labelKey": "current",
       "icon": "lyrics",
       "group": "lyrics",
+      "presentation": "workspace",
       "playerPlacement": "sidebar"
     },
     {
@@ -156,6 +157,7 @@
       "labelKey": "candidates",
       "icon": "lyrics",
       "group": "lyrics",
+      "presentation": "workspace",
       "playerPlacement": "sidebar"
     },
     {

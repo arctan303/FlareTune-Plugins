@@ -95,3 +95,12 @@ test('Demo connection UI exposes no QR session or real connect action', () => {
   assert.doesNotMatch(markup, /<img|>连接小米账号<|>投放此歌曲</);
 });
 
+test('connected speaker settings keep unlink after device controls with its privacy consequences',()=>{
+  resetState();const markup=render(settings.SpeakerConnectionPanel,{speakers:speakerState});
+  assert.ok(markup.indexOf('解绑小米账号')>markup.indexOf('刷新音箱列表'));
+  assert.ok(markup.indexOf('解绑会撤销后续请求')>markup.indexOf('Living room'));
+  assert.equal((markup.match(/解绑小米账号/g)||[]).length,1);
+  resetState({status:{connected:false,devices:[]}});const disconnected=render(settings.SpeakerConnectionPanel,{speakers:speakerState});
+  assert.match(disconnected,/授权将按你的 FlareTune 账号加密保存在后端/);assert.doesNotMatch(disconnected,/解绑小米账号/);
+});
+

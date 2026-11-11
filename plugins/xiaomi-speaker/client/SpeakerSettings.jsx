@@ -39,7 +39,7 @@ export function SpeakerConnectionPanel({ speakers, section = 'all' }) {
   const showConnection = section !== 'devices';
   const showDevices = section !== 'connection';
   return <div className="space-y-4">
-    {showConnection && <SpeakerPrivacy />}
+    {showConnection && !status?.connected && !status?.needsReconnect && <SpeakerPrivacy />}
     {demo ? <p role="status" className="text-sm text-[var(--muted)]">{t('演示模式不连接小米账号，也不向音箱发送指令。')}</p>
       : !status && loading ? <SettingsSkeleton compact rows={1} /> : <>
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -50,7 +50,6 @@ export function SpeakerConnectionPanel({ speakers, section = 'all' }) {
             {(!status.connected || status.needsReconnect) && <SettingsButton variant="primary" disabled={disabled} onClick={speakers.connect}>
               {t(qr ? '重新生成二维码' : '连接小米账号')}
             </SettingsButton>}
-            {(status.connected || status.needsReconnect) && <SettingsButton variant="danger" disabled={disabled} onClick={speakers.disconnect}>{t('解绑小米账号')}</SettingsButton>}
           </SettingsActions>}
         </div>
         {showConnection && qr && <div className="space-y-3 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4">
@@ -78,6 +77,10 @@ export function SpeakerConnectionPanel({ speakers, section = 'all' }) {
         </div>}
       </>}
     <SpeakerFeedback speakers={speakers} />
+    {showConnection && !demo && (status?.connected || status?.needsReconnect) && <div className="space-y-3 border-t border-[var(--line)] pt-4">
+      <SpeakerPrivacy />
+      <SettingsActions><SettingsButton variant="danger" disabled={disabled} onClick={speakers.disconnect}>{t('解绑小米账号')}</SettingsButton></SettingsActions>
+    </div>}
   </div>;
 }
 
