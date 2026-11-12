@@ -4,13 +4,13 @@ import {createBackgroundModuleHarness,flushBackgroundAsync} from '../../../tests
 const nodes=tree=>Array.isArray(tree)?tree.flatMap(nodes):tree&&typeof tree==='object'?[tree,...[tree.props?.action,...(tree.props?.children||[])].flat(Infinity).flatMap(nodes)]:[];
 const text=node=>typeof node==='string'?node:(node?.props?.children||[]).flat(Infinity).map(text).join('');
 const source={id:'fixture-source',name:'Existing source',note:'Saved note',protocol:'custom_lrc',enabled:true,searchUrl:'https://example.com/search',downloadUrl:'https://example.com/lyrics',translationLanguage:'en'};
-function fixture(){
+function fixture(locale = 'en'){
   const calls=[];let confirmed=false,setting={value:{version:2,sources:[source]},revision:4};
   const host={isCurrent:()=>true,request:async(path,options)=>{calls.push({path,options});return{setting:{value:options.body.value,revision:5}}}};
   const view=createBackgroundModuleHarness({file:new URL('./LyricSourcesSettings.jsx',import.meta.url),modules:{'@flaretune/plugin-sdk':{
-    t:(key,args={})=>key.replace(/\{([^}]+)\}/g,(_,name)=>args[name]??name),useLocale:()=> 'en',DEFAULT_LYRIC_CHANNELS:{version:2,sources:[]},MAX_LYRIC_SOURCES:20,normalizeLyricChannels:value=>value,
+    t:(key,args={})=>key.replace(/\{([^}]+)\}/g,(_,name)=>args[name]??name),useLocale:()=> locale,DEFAULT_LYRIC_CHANNELS:{version:2,sources:[]},MAX_LYRIC_SOURCES:20,normalizeLyricChannels:value=>value,
     SettingsSection:'section',SettingsEditDialog:'dialog',InfoTip:'tip',SettingsButton:'button',SettingsActions:'actions',SettingsToggle:'toggle',SettingsInput:'input',SettingsTextarea:'textarea',useSettingsReadOnly:()=>false,SelectControl:'select',ALL_LANGUAGES:[{code:'en',label:'English'}],getLanguageLabel:()=> 'English',
-  },'./LyricSourceQuickTest.jsx':'quick-test','lucide-react':{}},globals:{structuredClone,window:{confirm:()=>confirmed}}});
+  },'./LyricSourceQuickTest.jsx':'quick-test','lucide-react':{}},globals:{structuredClone,crypto,window:{confirm:()=>confirmed}}});
   return{...view,calls,confirm:()=>{confirmed=true},renderSettings:()=>view.render({setting,host,onSaved:value=>{setting=value}})};
 }
 test('source configuration stays hidden and cancel discards only the unsaved editor draft',()=>{
@@ -34,4 +34,15 @@ test('the high-frequency source enable switch keeps its original immediate-save 
   const f=fixture();const tree=f.renderSettings();await nodes(tree).find(n=>n.type==='toggle').props.onChange({target:{checked:false}});await flushBackgroundAsync();
   assert.equal(f.calls.length,1);assert.equal(f.calls[0].options.body.expectedRevision,4);assert.equal(f.calls[0].options.body.value.sources[0].enabled,false);
   assert.equal(f.calls[0].options.body.value.sources[0].searchUrl,source.searchUrl);f.unmount();
+});
+test('new source translation language follows the interface while existing source values survive editing',()=>{
+  for (const [locale, expected] of [['zh','zh'],['zh-Hant','zh-Hant'],['en','en'],['ja','ja'],['ko','ko'],['unknown','en']]) {
+    const f=fixture(locale);let tree=f.renderSettings();
+    nodes(tree).find(n=>n.type==='button'&&text(n)==='添加源').props.onClick();tree=f.renderSettings();
+    assert.equal(nodes(tree).find(n=>n.type==='select').props.value,expected,locale);
+    nodes(tree).find(n=>n.type==='dialog').props.onClose();tree=f.renderSettings();
+    nodes(tree).find(n=>n.type==='button'&&n.props['aria-label']==='编辑 Existing source').props.onClick();tree=f.renderSettings();
+    assert.equal(nodes(tree).find(n=>n.type==='select').props.value,'en','editing keeps the saved source language');
+    assert.equal(f.calls.length,0,'opening and cancelling do not save');f.unmount();
+  }
 });

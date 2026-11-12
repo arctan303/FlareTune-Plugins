@@ -24,6 +24,8 @@ export default function AiReviewConversation({
     processClock,
     welcomeReady,
     welcomeText,
+    loadError,
+    onRetryLoad,
 }) {
     useLocale();
     const showGreeting = phase === 'ready' && welcomeReady && messages.length === 0;
@@ -38,6 +40,11 @@ export default function AiReviewConversation({
             onPointerDown={event => { if (event.target === event.currentTarget) onUserScrollIntent?.(); }}
             className={`assistant-conversation flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 sm:px-6 md:px-8 py-6 flex flex-col bg-transparent relative custom-scrollbar ${showGreeting ? 'assistant-conversation--welcome' : ''}`}
         >
+            {loadError && <div role="alert" className="mx-auto mb-4 w-full max-w-3xl space-y-3 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 text-sm">
+                <p>{t(loadError)}</p>
+                <button type="button" className="settings-button" onClick={onRetryLoad}>{t('重试')}</button>
+            </div>}
+            {phase === 'skeleton' && messages.length === 0 && <span role="status" className="sr-only">{t('正在加载对话…')}</span>}
             {showGreeting ? (
                 <div className="assistant-greeting" aria-label={welcomeText}>
                     <span>{welcomeText}</span>

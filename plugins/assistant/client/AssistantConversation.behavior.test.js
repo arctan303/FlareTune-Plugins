@@ -33,6 +33,19 @@ new Function('require', 'module', 'exports', compiled)(name => {
 }, module, module.exports);
 const Conversation = module.exports.default;
 
+test('history loading preserves the blank visual surface and announces its real state',()=>{
+    const html=renderToStaticMarkup(React.createElement(Conversation,{messages:[],phase:'skeleton',welcomeReady:true,welcomeText:'greeting'}));
+    assert.match(html, /<span role="status" class="sr-only">[^<]+<\/span>/);
+    assert.ok(!html.includes('assistant-greeting'));
+    assert.ok(!html.includes('aria-hidden="true"'), 'loading does not add visible decorative message blocks');
+});
+
+test('history failure renders an enduring error with a local recovery action',()=>{
+    const html=renderToStaticMarkup(React.createElement(Conversation,{messages:[],phase:'failed',loadError:'offline',onRetryLoad(){}}));
+    assert.ok(html.includes('role="alert"'));assert.ok(html.includes('offline'));assert.match(html,/<button[^>]*type="button"/);
+    assert.ok(!html.includes('assistant-greeting'),'failure is not a new empty conversation');
+});
+
 test('conversation localizes tool details while user text, assistant prose and thoughts retain their original language', async () => {
     const thought = '查询到 2 首歌曲';
     const messages = [

@@ -1,6 +1,6 @@
 {
   "id": "lyrics-workbench",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "hostApiVersion": 3,
   "apiVersion": 1,
   "dataVersion": 0,
@@ -18,23 +18,48 @@
   "metadata": {
     "zh": {
       "name": "歌词工作台",
-      "description": "查看、选择和编辑歌词；安装 AI 网关后可使用 AI 辅助功能。"
+      "description": "查看、选择和编辑歌词；安装 AI 网关后可使用 AI 辅助功能。",
+      "introduction": [
+        "围绕当前歌曲查看歌词、比较候选版本，并进行文本校对、时间调整和歌词文件导入导出。已有逐行或逐字歌词可以继续查看和管理。",
+        "先播放或选择一首歌曲，再进入当前歌词或候选歌词页。基础查看和编辑无需 AI 网关；若要使用 AI 补全、翻译或清理，管理员需在网关左侧“设置”中配置连接，并在本插件左侧“设置”中配置模型。",
+        "歌词和译文是同一首歌供站点成员共用的结果，管理员保存会影响其他成员。编辑及编辑中的 AI 结果先留在草稿，检查并最终保存后才写入共享歌词；成员可以查看现有结果。"
+      ]
     },
     "zh-Hant": {
       "name": "歌詞工作台",
-      "description": "檢視、選擇和編輯歌詞；安裝 AI 閘道後可使用 AI 輔助功能。"
+      "description": "檢視、選擇和編輯歌詞；安裝 AI 閘道後可使用 AI 輔助功能。",
+      "introduction": [
+        "圍繞目前歌曲查看歌詞、比較候選版本，並進行文字校對、時間調整與歌詞檔案匯入匯出。既有逐行或逐字歌詞可繼續查看與管理。",
+        "先播放或選擇一首歌曲，再進入目前歌詞或候選歌詞頁。基本查看與編輯無須 AI 閘道；若要使用 AI 補全、翻譯或清理，管理員須在閘道左側「設定」中設定連線，並在本外掛左側「設定」中設定模型。",
+        "歌詞與譯文是同一首歌供站點成員共用的結果，管理員儲存會影響其他成員。編輯及編輯中的 AI 結果先保留在草稿，檢查並最終儲存後才寫入共用歌詞；成員可以查看既有結果。"
+      ]
     },
     "en": {
       "name": "Lyrics workspace",
-      "description": "View, choose and edit lyrics, with optional AI assistance through the AI gateway."
+      "description": "View, choose and edit lyrics, with optional AI assistance through the AI gateway.",
+      "introduction": [
+        "Inspect lyrics for the current song, compare candidate versions, correct text, adjust timing and import or export lyric files. Existing line-timed and word-timed lyrics remain available to view and manage.",
+        "Play or select a song, then open Current lyrics or Lyric candidates. Basic viewing and editing do not require AI gateway. For AI completion, translation or cleanup, an administrator opens Settings in the gateway's left sidebar to configure the connection, then Settings in this plugin's left sidebar to choose the model.",
+        "Lyrics and translations are shared song assets used by site members, so an administrator's save affects other listeners. Edits and AI results produced while editing stay in the draft until reviewed and finally saved to the shared lyrics. Members can view existing results."
+      ]
     },
     "ja": {
       "name": "歌詞ワークスペース",
-      "description": "歌詞を表示、選択、編集します。AI ゲートウェイをインストールすると AI 支援も使えます。"
+      "description": "歌詞を表示、選択、編集します。AI ゲートウェイをインストールすると AI 支援も使えます。",
+      "introduction": [
+        "現在の曲の歌詞を確認し、候補を比較して、テキストの修正、タイミングの調整、歌詞ファイルの読み込み・書き出しを行えます。既存の行単位・単語単位の同期歌詞も確認・管理できます。",
+        "まず曲を再生または選択し、現在の歌詞または歌詞候補のページを開きます。基本的な表示と編集に AI ゲートウェイは不要です。AI による補完、翻訳、整理を使う場合は、管理者がゲートウェイの左側にある「設定」で接続を、このプラグインの左側にある「設定」でモデルを設定します。",
+        "歌詞と翻訳は同じ曲を聴くサイトメンバーで共有されるため、管理者の保存は他のメンバーにも反映されます。編集内容と編集中の AI 結果は下書きに留まり、確認して最終保存した時点で共有歌詞に書き込まれます。メンバーは既存の結果を閲覧できます。"
+      ]
     },
     "ko": {
       "name": "가사 작업 공간",
-      "description": "가사를 보고 선택하고 편집합니다. AI 게이트웨이를 설치하면 AI 보조 기능도 사용할 수 있습니다."
+      "description": "가사를 보고 선택하고 편집합니다. AI 게이트웨이를 설치하면 AI 보조 기능도 사용할 수 있습니다.",
+      "introduction": [
+        "현재 곡의 가사를 확인하고 후보 버전을 비교하며 텍스트 교정, 시간 조정과 가사 파일 가져오기·내보내기를 할 수 있습니다. 기존의 줄 단위 및 단어 단위 동기화 가사도 확인하고 관리할 수 있습니다.",
+        "먼저 곡을 재생하거나 선택한 다음 현재 가사 또는 가사 후보 페이지를 여세요. 기본 보기와 편집에는 AI 게이트웨이가 필요하지 않습니다. AI 보완, 번역이나 정리를 사용하려면 관리자가 게이트웨이 왼쪽의 ‘설정’에서 연결을 구성하고 이 플러그인 왼쪽의 ‘설정’에서 모델을 설정해야 합니다.",
+        "가사와 번역은 같은 곡을 듣는 사이트 구성원이 공유하므로 관리자가 저장하면 다른 구성원에게도 반영됩니다. 편집 내용과 편집 중 생성한 AI 결과는 초안에 남으며, 확인 후 최종 저장해야 공유 가사에 기록됩니다. 구성원은 기존 결과를 볼 수 있습니다."
+      ]
     }
   },
   "messages": {

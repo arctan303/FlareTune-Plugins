@@ -1,6 +1,6 @@
 {
   "id": "roam",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "hostApiVersion": 2,
   "apiVersion": 1,
   "dataVersion": 0,
@@ -22,23 +22,48 @@
   "metadata": {
     "zh": {
       "name": "漫游",
-      "description": "按语种探索音乐，为播放队列持续补充歌曲。"
+      "description": "按语种探索音乐，为播放队列持续补充歌曲。",
+      "introduction": [
+        "从本站曲库中按所选语种抽取歌曲，在队尾按批次继续补歌，适合不想逐首挑选时持续收听。曲目仍使用原有播放器和队列。",
+        "管理员安装后，打开漫游页，在私人电台中选择语种和每次补充数量，再自行开启。安装或重装不会自动开启电台或开始播放。",
+        "语种和批量偏好按当前账号保存，电台操作只影响自己的播放队列。关闭后停止继续补歌，已排队歌曲和当前播放保留；普通分类浏览不依赖此插件。"
+      ]
     },
     "zh-Hant": {
       "name": "漫遊",
-      "description": "依語種探索音樂，持續為播放佇列補充歌曲。"
+      "description": "依語種探索音樂，持續為播放佇列補充歌曲。",
+      "introduction": [
+        "從本站曲庫依所選語種抽取歌曲，在佇列尾端分批補歌，適合不想逐首挑選時持續聆聽。曲目仍使用原有播放器與佇列。",
+        "管理員安裝後，開啟漫遊頁，在私人電台選擇語種與每次補充數量，再自行開啟。安裝或重新安裝不會自動開啟電台或開始播放。",
+        "語種與批量偏好依目前帳號儲存，電台操作只影響自己的播放佇列。關閉後停止繼續補歌，已排隊歌曲與目前播放保留；一般分類瀏覽不依賴此外掛。"
+      ]
     },
     "en": {
       "name": "Roam",
-      "description": "Explore music by language and keep adding songs to the playback queue."
+      "description": "Explore music by language and keep adding songs to the playback queue.",
+      "introduction": [
+        "Samples songs from this site's library in your chosen languages and adds batches at the end of the queue for continuous listening. Songs use the existing player and playback queue.",
+        "After an administrator installs the plugin, open Roam, choose languages and a batch size in Personal radio, then turn it on yourself. Installing or reinstalling does not automatically enable the radio or start playback.",
+        "Language and batch preferences are saved for the current account, and radio actions affect only your own queue. Turning it off stops further additions while keeping queued songs and current playback. Ordinary category browsing does not require this plugin."
+      ]
     },
     "ja": {
       "name": "ローミング",
-      "description": "言語ごとに音楽を探し、再生キューに曲を追加します。"
+      "description": "言語ごとに音楽を探し、再生キューに曲を追加します。",
+      "introduction": [
+        "サイトのライブラリから選んだ言語の曲を抽出し、キューの末尾にまとめて追加します。曲を一つずつ選ばずに聴き続けたいときに使え、既存のプレーヤーと再生キューをそのまま利用します。",
+        "管理者がインストールした後、ローミングページのパーソナルラジオで言語と一度に追加する曲数を選び、自分で有効にしてください。インストールや再インストールだけでラジオが有効になったり、再生が始まったりすることはありません。",
+        "言語と追加曲数の設定は現在のアカウントごとに保存され、ラジオの操作は自分のキューにのみ反映されます。無効にすると追加を停止し、既に並んでいる曲と現在の再生は維持されます。通常のカテゴリ閲覧にはこのプラグインは不要です。"
+      ]
     },
     "ko": {
       "name": "로밍",
-      "description": "언어별로 음악을 탐색하고 재생 대기열에 곡을 계속 추가합니다."
+      "description": "언어별로 음악을 탐색하고 재생 대기열에 곡을 계속 추가합니다.",
+      "introduction": [
+        "사이트 음악 라이브러리에서 선택한 언어의 곡을 추출하여 대기열 끝에 묶음으로 추가합니다. 곡을 하나씩 고르지 않고 계속 듣고 싶을 때 사용할 수 있으며 기존 플레이어와 재생 대기열을 그대로 이용합니다.",
+        "관리자가 설치한 뒤 로밍 페이지의 개인 라디오에서 언어와 한 번에 추가할 곡 수를 고르고 직접 켜세요. 설치하거나 다시 설치하는 것만으로 라디오가 켜지거나 재생이 시작되지는 않습니다.",
+        "언어와 추가 곡 수 설정은 현재 계정별로 저장되며 라디오 작업은 자신의 대기열에만 반영됩니다. 끄면 추가 작업이 멈추고 이미 대기 중인 곡과 현재 재생은 유지됩니다. 일반 카테고리 탐색에는 이 플러그인이 필요하지 않습니다."
+      ]
     }
   },
   "messages": {

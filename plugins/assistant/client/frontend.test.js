@@ -129,3 +129,31 @@ test('assistant body preserves the draft between conversation and memory and abo
   assert.deepEqual(f.actions, []); assert.deepEqual(f.notices, []);
   assert.equal(f.calls.filter(([path]) => path === 'thread').length, 1, 'retired SSE does not restart history polling');
 });
+
+function historyHarness(f) {
+  const scheduler=createBackgroundScheduler();
+  return createBackgroundModuleHarness({file:new URL('./AssistantView.jsx',import.meta.url),modules:{
+    '@flaretune/plugin-sdk':{...ui,ImagePreviewDialog:'preview'},'@flaretune/plugin-sdk/pure':{t},'lucide-react':icons,
+    './AssistantMemoryView.jsx':'memory','./AssistantAttachments.jsx':'attachments',
+    './AssistantConversation.jsx':'conversation','./Composer.jsx':{AiReviewComposer:'composer'},
+    './localPlayer.js':{dispatchLocalAssistantPlayerAction(){}}},
+    globals:{...scheduler,window:{...scheduler},AbortController,crypto,Intl}});
+}
+test('failed assistant history stays visible and retries locally without changing the input draft', async()=>{
+  const f=fixture();let threadReads=0;
+  f.host.requestResponse=async path=>{
+    if(path==='thread'&&++threadReads===1)throw new Error('offline');
+    return{ok:true,json:async()=>path==='bootstrap'?{assistant:{name:'Helper'}}:{thread:{revision:1,messages:[{id:'saved',role:'assistant',content:'Saved reply'}]}}};
+  };
+  const h=historyHarness(f);h.render({host:f.host});await flush();let tree=h.render();
+  let conversation=nodes(tree).find(n=>n.type==='conversation'),composer=nodes(tree).find(n=>n.type==='composer');
+  assert.equal(conversation.props.phase,'failed');assert.equal(conversation.props.loadError,'对话历史暂时无法载入，请重试。');
+  assert.equal(composer.props.phase,'failed');assert.deepEqual(f.notices,[],'persistent error does not depend on a toast');
+  composer.props.onInputChange('retained draft');await flush();tree=h.render();
+  assert.equal(nodes(tree).find(n=>n.type==='conversation').props.loadError,'对话历史暂时无法载入，请重试。');
+  nodes(tree).find(n=>n.type==='conversation').props.onRetryLoad();tree=h.render();
+  assert.equal(nodes(tree).find(n=>n.type==='conversation').props.phase,'skeleton');
+  await flush();tree=h.render();conversation=nodes(tree).find(n=>n.type==='conversation');composer=nodes(tree).find(n=>n.type==='composer');
+  assert.equal(threadReads,2);assert.equal(conversation.props.phase,'ready');assert.equal(conversation.props.loadError,'');
+  assert.equal(conversation.props.messages[0].content,'Saved reply');assert.equal(composer.props.inputText,'retained draft');h.unmount();
+});

@@ -1,11 +1,11 @@
 {
   "id": "ai-gateway",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "hostApiVersion": 3,
   "apiVersion": 1,
   "dataVersion": 0,
   "name": "AI 网关",
-  "description": "AI 渠道、模型、协议和密钥管理，为已安装的 AI 插件提供调用能力。",
+  "description": "管理 AI 供应商连接、协议和密钥，供已安装的 AI 插件调用。",
   "icon": "settings",
   "supportedLocales": [
     "zh",
@@ -18,23 +18,48 @@
   "metadata": {
     "zh": {
       "name": "AI 网关",
-      "description": "AI 渠道、模型、协议和密钥管理，为已安装的 AI 插件提供调用能力。"
+      "description": "管理 AI 供应商连接、协议和密钥，供已安装的 AI 插件调用。",
+      "introduction": [
+        "为助手、歌词工作台等 AI 插件提供统一的供应商连接。多个插件可以复用同一连接，无需分别录入供应商密钥。",
+        "管理员先进入网关左侧的“设置”添加供应商，按服务要求填写协议、连接地址和密钥；再到助手或歌词工作台左侧的“设置”选择供应商、模型和生成参数。",
+        "供应商连接属于站点配置，仅管理员可维护。网关本身不提供对话或歌词编辑，具体功能和可用能力由消费插件及所选供应商决定。"
+      ]
     },
     "zh-Hant": {
       "name": "AI 閘道",
-      "description": "管理 AI 渠道、模型、協定與金鑰，供已安裝的 AI 外掛呼叫。"
+      "description": "管理 AI 供應商連線、協定與金鑰，供已安裝的 AI 外掛呼叫。",
+      "introduction": [
+        "為助手、歌詞工作台等 AI 外掛提供統一的供應商連線。多個外掛可重用同一連線，無須分別輸入供應商金鑰。",
+        "管理員先進入閘道左側的「設定」新增供應商，依服務要求填寫協定、連線位址與金鑰；再到助手或歌詞工作台左側的「設定」選擇供應商、模型與生成參數。",
+        "供應商連線屬於站點設定，僅管理員可維護。閘道本身不提供對話或歌詞編輯，具體功能與可用能力由使用它的外掛及所選供應商決定。"
+      ]
     },
     "en": {
       "name": "AI gateway",
-      "description": "Manage AI providers, models, protocols and credentials for installed AI plugins."
+      "description": "Manage AI provider connections, protocols and credentials for installed AI plugins.",
+      "introduction": [
+        "Provides a shared provider connection for AI plugins such as Assistant and Lyrics workspace. Multiple plugins can reuse a connection without entering the provider credentials separately.",
+        "An administrator first opens Settings in the gateway's left sidebar and adds a provider with the required protocol, address and credentials. Then open Settings in the left sidebar of Assistant or Lyrics workspace to choose the provider, model and generation settings.",
+        "Provider connections are site settings managed by administrators. The gateway does not offer chat or lyric editing on its own; available features depend on the consuming plugin and the selected provider."
+      ]
     },
     "ja": {
       "name": "AI ゲートウェイ",
-      "description": "AI プロバイダー、モデル、プロトコルと認証情報を管理し、インストール済みの AI プラグインに提供します。"
+      "description": "AI プロバイダーへの接続、プロトコルと認証情報を管理し、インストール済みの AI プラグインに提供します。",
+      "introduction": [
+        "アシスタントや歌詞ワークスペースなどの AI プラグインに、共通のプロバイダー接続を提供します。同じ接続を複数のプラグインで利用でき、認証情報を個別に入力する必要がありません。",
+        "まず管理者がゲートウェイの左側にある「設定」を開き、プロバイダーと必要なプロトコル、接続先、認証情報を設定します。その後、アシスタントや歌詞ワークスペースの左側にある「設定」でプロバイダー、モデル、生成パラメーターを選びます。",
+        "プロバイダー接続は管理者が管理するサイト共通の設定です。ゲートウェイ単体では会話や歌詞編集を提供せず、使える機能は利用するプラグインと選択したプロバイダーによって異なります。"
+      ]
     },
     "ko": {
       "name": "AI 게이트웨이",
-      "description": "설치된 AI 플러그인에 사용할 공급자, 모델, 프로토콜 및 인증 정보를 관리합니다."
+      "description": "설치된 AI 플러그인에 사용할 공급자 연결, 프로토콜 및 인증 정보를 관리합니다.",
+      "introduction": [
+        "어시스턴트와 가사 작업 공간 같은 AI 플러그인에 공통 공급자 연결을 제공합니다. 여러 플러그인이 하나의 연결을 재사용하므로 공급자 인증 정보를 각각 입력할 필요가 없습니다.",
+        "먼저 관리자가 게이트웨이 왼쪽의 ‘설정’을 열어 공급자를 추가하고 필요한 프로토콜, 연결 주소와 인증 정보를 설정합니다. 이후 어시스턴트나 가사 작업 공간 왼쪽의 ‘설정’에서 공급자, 모델과 생성 매개변수를 선택합니다.",
+        "공급자 연결은 관리자만 관리하는 사이트 공통 설정입니다. 게이트웨이 자체에는 대화나 가사 편집 기능이 없으며, 사용 가능한 기능은 이를 사용하는 플러그인과 선택한 공급자에 따라 달라집니다."
+      ]
     }
   },
   "messages": {

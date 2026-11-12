@@ -16,6 +16,7 @@ import AssistantMemoryView from "./AssistantMemoryView.jsx";
 import AssistantAttachments from "./AssistantAttachments.jsx";
 import { resolveAssistantImagePreview } from "./imagePreview.js";
 import { DEFAULT_ASSISTANT_NAME, resolveAssistantWelcome } from "./welcome.js";
+import { isAssistantCompositionEvent } from './composerKeyboard.js';
 
 const toUiMessages = (list) => (Array.isArray(list) ? list : []).map((message) => ({
     ...message,
@@ -64,6 +65,8 @@ export default function AssistantView({ host, section = 'conversation', context 
     const welcomeReady = welcomeConfig.ready && welcomeConfig.accountId === accountId;
     const welcomeText = resolveAssistantWelcome(welcomeConfig.accountId === accountId ? welcomeConfig : null);
     const [phase, setPhase] = React.useState('skeleton');
+    const [threadLoadError, setThreadLoadError] = React.useState('');
+    const [threadLoadAttempt, setThreadLoadAttempt] = React.useState(0);
     const [expandedDetails, setExpandedDetails] = React.useState({});
     const [playlistConfirmations, setPlaylistConfirmations] = React.useState({});
 
@@ -255,12 +258,17 @@ export default function AssistantView({ host, section = 'conversation', context 
         setMessages([]);
         setPlaylistConfirmations({});
         setExpandedDetails({});
+        setThreadLoadError('');
+    }, [isAuthed, accountId, host]);
+
+    React.useEffect(() => {
         if (!isAuthed) {
             setPhase('ready');
             return undefined;
         }
         const controller = new AbortController();
         let threadLoadFailed = false;
+        setThreadLoadError('');
         setPhase('skeleton');
         syncThread({ signal: controller.signal, expectedAccountId: accountId })
             .catch((error) => {
@@ -269,13 +277,12 @@ export default function AssistantView({ host, section = 'conversation', context 
                 if (error?.status === 401) {
                     setAuthSession({ authenticated: false, user: null, initialized: true });
                 } else {
-                    showToast(t("对话历史暂时无法载入，请稍后刷新。"));
-                    setMessages([]);
+                    setThreadLoadError('对话历史暂时无法载入，请重试。');
                 }
             })
             .finally(() => { if (!controller.signal.aborted && isLive(accountId) && accountIdRef.current === accountId) setPhase(threadLoadFailed ? 'failed' : 'ready'); });
         return () => controller.abort();
-    }, [isAuthed, accountId, setAuthSession, syncThread]);
+    }, [isAuthed, accountId, setAuthSession, syncThread, threadLoadAttempt]);
 
     const handleStopGeneration = React.useCallback(() => {
             if (!isLive()) return;
@@ -623,6 +630,7 @@ export default function AssistantView({ host, section = 'conversation', context 
     }, [handleSend]);
 
     const handleKeyDown = React.useCallback((e) => {
+        if (isAssistantCompositionEvent(e)) return;
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             handleSend();
@@ -641,6 +649,8 @@ export default function AssistantView({ host, section = 'conversation', context 
             {/* 对话区主体（通透流式布局） */}
             <div className="flex-1 min-h-0 flex flex-col w-full relative">
                 <AiReviewConversation host={host}
+                    loadError={threadLoadError}
+                    onRetryLoad={() => setThreadLoadAttempt(value => value + 1)}
                     containerRef={chatContainerRef}
                     expandedDetails={expandedDetails}
                     messages={visibleMessages}

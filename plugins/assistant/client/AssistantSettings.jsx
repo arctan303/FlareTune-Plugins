@@ -83,7 +83,7 @@ export default function AssistantSettings({ host }) {
           </div>)}
         </div>}
         <SettingsActions><SettingsButton onClick={() => setEditing(false)} disabled={busy}>{t('取消')}</SettingsButton>
-          <SettingsButton type="submit" disabled={busy || readOnly}>{t('保存')}</SettingsButton></SettingsActions>
+          <SettingsButton type="submit" variant="primary" disabled={busy || readOnly}>{t('保存')}</SettingsButton></SettingsActions>
       </form>
     </SettingsEditDialog>}
   </div>;

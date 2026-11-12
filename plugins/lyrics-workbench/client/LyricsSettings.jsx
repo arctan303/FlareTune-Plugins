@@ -1,5 +1,5 @@
 import React from 'react';
-import { t, useLocale, SettingsSection, SettingsEditDialog, SettingsActions, SettingsButton, SettingsToggle, SelectControl, InfoTip, ServiceModelSettings } from '@flaretune/plugin-sdk';
+import { t, useLocale, SettingsSection, SettingsEditDialog, SettingsActions, SettingsButton, SettingsToggle, SelectControl, ServiceModelSettings } from '@flaretune/plugin-sdk';
 import LyricSourcesSettings from './LyricSourcesSettings.jsx';
 import { TRANSLATION_TARGETS, translationTargetLabel } from '../shared/translation-languages.js';
 import { workbenchMessage } from '../shared/messages.js';
@@ -63,14 +63,14 @@ export default function LyricsSettings({ host }) {
       <form className="space-y-5" onSubmit={event => void save(event)}>
       <SettingsToggle label={tr('onlineEnabled')} checked={Boolean(draft.onlineEnabled)} disabled={busy}
         onChange={event => patch('onlineEnabled', event.target.checked)} />
-      <div className="grid gap-4 sm:grid-cols-2 mt-5">
-        <label className="space-y-2"><span>{tr('lyricPreference')}</span>
-          <SelectControl aria-label={tr('lyricPreference')} value={draft.lyricPreference} disabled={busy} onChange={event => patch('lyricPreference', event.target.value)}>
+      <div className="settings-form-grid">
+        <label><span className="settings-field-label">{tr('lyricPreference')}</span>
+          <SelectControl className="settings-field" aria-label={tr('lyricPreference')} value={draft.lyricPreference} disabled={busy} onChange={event => patch('lyricPreference', event.target.value)}>
             <option value="word">{tr('preferWord')}</option><option value="line">{tr('preferLine')}</option>
           </SelectControl>
         </label>
-        <label className="space-y-2"><span>{tr('aiCompletion')}</span>
-          <SelectControl aria-label={tr('aiCompletion')} value={modeOf(draft)} disabled={busy} onChange={event => {
+        <label><span className="settings-field-label">{tr('aiCompletion')}</span>
+          <SelectControl className="settings-field" aria-label={tr('aiCompletion')} value={modeOf(draft)} disabled={busy} onChange={event => {
             const mode = event.target.value;
             setDraft(current => ({ ...current, completionEnabled: mode !== 'off', automaticCompletionEnabled: mode === 'auto',
               ...(mode !== 'off' ? { translateLyrics: true } : {}) }));
@@ -78,12 +78,13 @@ export default function LyricsSettings({ host }) {
             <option value="off">{tr('off')}</option><option value="manual">{tr('manual')}</option><option value="auto">{tr('automatic')}</option>
           </SelectControl>
         </label>
-        <label className="space-y-2"><span className="flex items-center gap-2">{t('目标译文语言')}
-          <InfoTip text={t('实例内所有用户共用一份译文；修改后旧译文不会自动变成新语言。')} /></span>
-          <SelectControl aria-label={t('目标译文语言')} value={draft.targetLanguage} disabled={busy} onChange={event => patch('targetLanguage', event.target.value)}>
+        <div>
+          <label htmlFor="lyric-policy-target" className="settings-field-label">{t('目标译文语言')}</label>
+          <SelectControl id="lyric-policy-target" className="settings-field" aria-label={t('目标译文语言')} value={draft.targetLanguage} disabled={busy} onChange={event => patch('targetLanguage', event.target.value)}>
             {TRANSLATION_TARGETS.map(code => <option key={code} value={code}>{translationTargetLabel(code, locale)}</option>)}
           </SelectControl>
-        </label>
+          <p className="mt-2 text-xs leading-relaxed text-[var(--muted)]">{t('所有用户共用译文；更改语言不会转换已有译文。')}</p>
+        </div>
       </div>
     <SettingsActions><SettingsButton closeDialog disabled={busy}>{t('取消')}</SettingsButton>
       <SettingsButton type="submit" variant="primary" disabled={busy}>{t(busy ? '正在保存…' : '保存')}</SettingsButton></SettingsActions>

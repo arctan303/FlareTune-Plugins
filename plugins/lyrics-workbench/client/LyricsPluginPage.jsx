@@ -383,7 +383,7 @@ function LyricsWorkspaceContent({ host, pageId, context = {} }) {
         </div>
       </div>}
       {section === 'current' && <div className="lyric-studio__actions">
-        <button type="button" onClick={() => void managed.load()}><RefreshCw size={15} />{t("刷新")}</button>
+        <button type="button" disabled={managed.loading || managed.refreshing || managed.saving} onClick={() => void managed.load()}><RefreshCw size={15} />{t("刷新")}</button>
         {authenticated && managed.aiCompletionEnabled && (!editing || isAdmin) && <button type="button"
           disabled={editing ? draftAiBusy || managed.saving
             : !hasAsset || managed.saving || managed.isAiCompleting}
@@ -411,10 +411,11 @@ function LyricsWorkspaceContent({ host, pageId, context = {} }) {
     <div className="lyric-studio__layout">
       {section === 'current' && <section className="lyric-studio__main" aria-label={t("当前歌词")}>
         {managed.loading && <div className="lyric-studio__empty"><Loader2 className="animate-spin" />{t("正在读取歌词…")}</div>}
-        {!managed.loading && !hasAsset && !editing && <div className="lyric-studio__empty"><Languages size={28} />
+        {managed.refreshing && <p role="status">{t('正在更新歌词…')}</p>}
+        {!managed.loading && !managed.error && !hasAsset && !editing && <div className="lyric-studio__empty"><Languages size={28} />
           <strong>{t("这首歌还没有歌词")}</strong>
           <button type="button" onClick={() => setSection('candidates')}>{t("查找歌词")}</button></div>}
-        {!managed.loading && (hasAsset || editing) && <div className={'lyric-studio__preview-frame' + (isAdmin && (hasTimeline || editing && rows.some((row) => row.time)) ? ' has-shift-rail' : '')}>
+        {(hasAsset || editing) && <div className={'lyric-studio__preview-frame' + (isAdmin && (hasTimeline || editing && rows.some((row) => row.time)) ? ' has-shift-rail' : '')}>
           <Preview key={song.id} value={managed.lyrics} previewShiftMs={shift}
           currentTime={currentTime} followsPlayback={followsPlayback} editing={editing} rows={rows}
           errors={rowErrors} activeCell={activeCell} onActivate={setActiveCell}
@@ -423,7 +424,8 @@ function LyricsWorkspaceContent({ host, pageId, context = {} }) {
             value={shift} onChange={editing ? changeShift : setShift} saving={managed.saving} draft={editing} onApply={async () => {
               if (await managed.shiftTimeline(shift)) setShift(0);
             }} />}</div>}
-        {managed.error && <p className="lyric-studio__error" role="alert">{t(managed.error)}</p>}
+        {managed.error && <div className="lyric-studio__error" role="alert"><p>{t(managed.error)}</p>
+          <button type="button" disabled={managed.loading || managed.refreshing || managed.saving} onClick={() => void managed.load()}>{t('重试')}</button></div>}
         {followsPlayback && <div className="lyric-studio__timeline" aria-label={t("当前歌曲播放进度")}>
           <time>{playbackTime(currentTime)}</time>
           <ProgressBar />

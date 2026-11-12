@@ -14,12 +14,13 @@ const dictionary = {
   '导入会替换当前共享歌词。继续吗？': 'Importing will replace the shared lyrics. Continue?',
   '恢复备份会替换这首歌当前使用的共享歌词。继续吗？': 'Restoring will replace this song’s shared lyrics. Continue?',
   '读取当前歌词文件失败': 'Could not load lyrics',
+  '重试': 'Retry',
 };
 const interpolate = (key, values) => key.replace(/\{(\w+)\}/g, (_, name) => String(values?.[name] ?? `{${name}}`));
 const translate = (key, values) => interpolate(dictionary[key] || key, values);
 
 function setup({ managed: overrides = {}, section = 'current', translator = translate, exportName = 'LyricsWorkspaceContent' } = {}) {
-  const song = { id: 's1', title: 'Song', artist: 'Artist' }, confirmations = [], saves = [];
+  const song = { id: 's1', title: 'Song', artist: 'Artist' }, confirmations = [], saves = [], loads = [];
   const ui = { lyricsWorkspaceSong: song, authSession: { authenticated: true, user: { role: 'admin' } },
     setLyricsWorkspaceBeforeCloseGuard() {}, approveLyricsWorkspaceExit: () => true };
   const useUIStore = selector => selector(ui); useUIStore.getState = () => ui;
@@ -27,7 +28,7 @@ function setup({ managed: overrides = {}, section = 'current', translator = tran
   const managed = { asset: { status: 'ready', original: { syncMode: 'line' } },
     lyrics: { syncMode: 'line', lines: [{ time: 1, text: 'Hello' }] }, etag: 'e1',
     saveDocument: async (...args) => { saves.push(args); return true; },
-    importLrc: async () => true, restoreBackup: async () => true, ...overrides };
+    importLrc: async () => true, restoreBackup: async () => true, load: async () => { loads.push('read'); }, ...overrides };
   const component = hookComponent({ file: fileURLToPath(new URL('./LyricsPluginPage.jsx', import.meta.url)), exportName,
     modules: {
       '../../../shared/lyricSources.js': { lyricSourceLabel: x => x }, '@flaretune/plugin-sdk/client/i18n': { t: translator },
@@ -52,7 +53,7 @@ function setup({ managed: overrides = {}, section = 'current', translator = tran
     }, globals: { window: { confirm: message => { confirmations.push(message); return false; },
       addEventListener() {}, removeEventListener() {} } } });
   const props = { host: { isCurrent: () => true, notify() {}, session: { get: () => ui.authSession }, beforeLeave: { register: () => () => {}, approve: () => true }, navigate() {}, returnToOrigin() {} }, pageId: section, context: { song, route: { songId: 's1', section } } };
-  return { component, confirmations, saves, render: () => component.render(props) };
+  return { component, confirmations, saves, loads, render: () => component.render(props) };
 }
 
 test('workspace confirms unsaved edits and timing conversion using complete translated messages', async () => {
@@ -84,10 +85,15 @@ test('import and restore confirmations use translated sentences', async () => {
   s.component.unmount();
 });
 
-test('workspace localizes the saved sync mode and managed errors', () => {
+test('workspace localizes the saved sync mode and managed errors with a working translated retry', async () => {
   const s = setup({ managed: { error: '读取当前歌词文件失败' } });
   const tree = s.render();
-  assert.equal(text(nodes(tree).find(node => node.props.role === 'alert')), 'Could not load lyrics');
+  const alert = nodes(tree).find(node => node.props.role === 'alert');
+  assert.equal(text(nodes(alert).find(node => node.type === 'p')), 'Could not load lyrics');
+  const retry = button(alert, 'Retry');
+  assert.ok(retry, 'the recovery action uses the selected UI language');
+  await retry.props.onClick(); await flushAsync();
+  assert.deepEqual(s.loads, ['read'], 'retry re-reads the current lyric asset');
   assert.equal(text(nodes(tree).find(node => node.props.className === 'lyric-studio__formats')).includes('Line timing'), true);
   s.component.unmount();
 });

@@ -2,6 +2,7 @@ import { t } from '@flaretune/plugin-sdk/client/i18n';
 import React from 'react';
 import { ArrowUp, Brain, ImagePlus, Loader2, Play, Square } from 'lucide-react';
 import { dropAttachmentFiles, isFileTransfer, pasteAttachmentImages } from './attachmentInput.js';
+import { isAssistantCompositionEvent } from './composerKeyboard.js';
 
 export function AiReviewComposer({
   authenticated,
@@ -26,6 +27,7 @@ export function AiReviewComposer({
 }) {
   const [draggingFiles, setDraggingFiles] = React.useState(false);
   const dragDepth = React.useRef(0);
+  const composing = React.useRef(false);
   const canAddImages = Boolean(onImageFiles) && !isLoading && !attachmentsBusy && phase === 'ready';
   React.useEffect(() => { if (!canAddImages) { dragDepth.current = 0; setDraggingFiles(false); } }, [canAddImages]);
   const resizePageInput = React.useCallback(() => {
@@ -70,7 +72,10 @@ export function AiReviewComposer({
               rows={1}
               value={inputText}
               onChange={(event) => onInputChange(event.target.value)}
-              onKeyDown={onKeyDown}
+              onCompositionStart={() => { composing.current = true; }}
+              onCompositionEnd={() => { composing.current = false; }}
+              onBlur={() => { composing.current = false; }}
+              onKeyDown={event => { if (!isAssistantCompositionEvent(event, composing.current)) onKeyDown?.(event); }}
               placeholder={t("聊聊音乐…")}
               disabled={isLoading || phase !== 'ready'}
               className="assistant-composer__input"

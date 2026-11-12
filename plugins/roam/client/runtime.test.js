@@ -106,9 +106,9 @@ test('browse header observes radio preferences through its real state hook witho
   } finally { cleanup(); }
 });
 
-test('roam 0.1.1 keeps its service page while host navigation owns the primary entry', () => {
+test('roam keeps its service page while host navigation owns the primary entry', () => {
   const manifest = JSON.parse(readFileSync(new URL('../manifest.json', import.meta.url), 'utf8'));
-  assert.equal(manifest.version, '0.1.1');
+  assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
   assert.ok(manifest.pages.some(page => page.id === 'browse' && page.kind === 'service'));
   assert.equal(manifest.entries.some(entry => entry.slot === 'sidebar.primary'), false);
   assert.equal(manifest.hostApiVersion, 2);

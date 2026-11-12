@@ -66,22 +66,22 @@ export default function YouTubePreferences({ host }) {
     </SettingsSection>
     {draft && <SettingsEditDialog title={tr('preferences')} onClose={close} busy={busy} message={error ? tr(error) : ''}>
       <form className="space-y-5" onSubmit={event => void save(event)}>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <label className="space-y-2"><span>{tr('metadataLanguage')}</span>
-            <SelectControl aria-label={tr('metadataLanguage')} disabled={busy} value={draft.metadataLanguage} onChange={event => patch('metadataLanguage', event.target.value)}>
+        <div className="settings-form-grid">
+          <label><span className="settings-field-label">{tr('metadataLanguage')}</span>
+            <SelectControl className="settings-field" aria-label={tr('metadataLanguage')} disabled={busy} value={draft.metadataLanguage} onChange={event => patch('metadataLanguage', event.target.value)}>
               {languages.map(code => <option key={code} value={code}>{YOUTUBE_TRANSLATION_LANGUAGES.includes(code) ? tr(code) : code}</option>)}
             </SelectControl>
           </label>
-          <label className="space-y-2"><span>{tr('region')}</span>
-            <SelectControl aria-label={tr('region')} disabled={busy} value={draft.region} onChange={event => patch('region', event.target.value)}>
+          <label><span className="settings-field-label">{tr('region')}</span>
+            <SelectControl className="settings-field" aria-label={tr('region')} disabled={busy} value={draft.region} onChange={event => patch('region', event.target.value)}>
               {countries.map(code => <option key={code} value={code}>{regionName(code)}</option>)}
             </SelectControl>
           </label>
         </div>
         <SettingsToggle label={tr('lyricsEnabled')} checked={draft.lyricsEnabled} disabled={busy} onChange={event => patch('lyricsEnabled', event.target.checked)} />
         <SettingsToggle label={tr('translationEnabled')} checked={draft.translationEnabled} disabled={busy || !draft.lyricsEnabled} onChange={event => patch('translationEnabled', event.target.checked)} />
-        <label className="block space-y-2"><span>{tr('translationLanguage')}</span>
-          <SelectControl aria-label={tr('translationLanguage')} disabled={busy || !draft.lyricsEnabled || !draft.translationEnabled}
+        <label className="block"><span className="settings-field-label">{tr('translationLanguage')}</span>
+          <SelectControl className="settings-field" aria-label={tr('translationLanguage')} disabled={busy || !draft.lyricsEnabled || !draft.translationEnabled}
             value={draft.translationLanguage} onChange={event => patch('translationLanguage', event.target.value)}>
             {YOUTUBE_TRANSLATION_LANGUAGES.map(code => <option key={code} value={code}>{tr(code)}</option>)}
           </SelectControl>

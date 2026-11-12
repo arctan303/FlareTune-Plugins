@@ -1,6 +1,6 @@
 {
   "id": "xiaomi-speaker",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "hostApiVersion": 2,
   "apiVersion": 1,
   "name": "小米音箱",
@@ -17,23 +17,53 @@
   "metadata": {
     "zh": {
       "name": "小米音箱",
-      "description": "连接本人的小米账号，将网页播放器输出到小爱音箱。"
+      "description": "连接本人的小米账号，将网页播放器输出到小爱音箱。",
+      "introduction": [
+        "将网页播放器的输出切换到小爱音箱，继续使用现有队列、上下首和音量控制。一次只让当前选定的一个输出端发声。",
+        "管理员安装插件后，用自己的 FlareTune 账号进入插件左侧“设置”，在其中扫码连接本人的小米账号，刷新并选择设备，再开启音箱输出。连接和设备按 FlareTune 账号隔离。",
+        "目前支持的小爱音箱型号为 L05B，播放内容限可用的 MP3 歌曲；不支持的设备或格式不能直接播放。",
+        "音箱输出开启时本机保持静音。网页需继续运行以接续队列；显示的进度由网页播放器驱动，不代表音箱实测进度，设备控制可能存在延迟。"
+      ]
     },
     "zh-Hant": {
       "name": "小米音箱",
-      "description": "連接自己的小米帳號，將網頁播放器輸出到小愛音箱。"
+      "description": "連接自己的小米帳號，將網頁播放器輸出到小愛音箱。",
+      "introduction": [
+        "將網頁播放器的輸出切換到小愛音箱，繼續使用既有佇列、上一首／下一首與音量控制。一次只讓目前選定的一個輸出端發聲。",
+        "管理員安裝外掛後，以自己的 FlareTune 帳號進入外掛左側「設定」，在其中掃碼連接本人的小米帳號，重新整理並選擇裝置，再開啟音箱輸出。連線與裝置依 FlareTune 帳號隔離。",
+        "目前支援的小愛音箱型號為 L05B，播放內容限可用的 MP3 歌曲；不支援的裝置或格式無法直接播放。",
+        "音箱輸出開啟時本機保持靜音。網頁須繼續執行才能接續佇列；顯示的進度由網頁播放器驅動，不代表音箱實測進度，裝置控制可能有延遲。"
+      ]
     },
     "en": {
       "name": "Xiaomi speakers",
-      "description": "Connect your Xiaomi account to play web player audio on a XiaoAI speaker."
+      "description": "Connect your Xiaomi account to play web player audio on a XiaoAI speaker.",
+      "introduction": [
+        "Switch the web player's output to a XiaoAI speaker while keeping the existing queue, track controls and volume control. Only one selected output plays sound at a time.",
+        "After an administrator installs the plugin, sign in to your FlareTune account and open Settings in the plugin's left sidebar. Connect your own Xiaomi account by scanning, refresh and choose a device, then enable speaker output. Connections and devices are isolated by FlareTune account.",
+        "The currently supported XiaoAI model is L05B, and playback is limited to available MP3 songs. Unsupported devices or formats cannot play directly.",
+        "Local audio stays muted while speaker output is enabled. Keep the web page running for queue continuation. The displayed progress comes from the web player rather than measured speaker progress, and device controls may be delayed."
+      ]
     },
     "ja": {
       "name": "Xiaomi スピーカー",
-      "description": "自分のXiaomiアカウントを接続し、ウェブプレーヤーの音声をXiaoAIスピーカーで再生します。"
+      "description": "自分のXiaomiアカウントを接続し、ウェブプレーヤーの音声をXiaoAIスピーカーで再生します。",
+      "introduction": [
+        "既存のキュー、曲送り、音量操作を使いながら、ウェブプレーヤーの出力を XiaoAI スピーカーに切り替えます。同時に音を出すのは選択中の一つの出力先だけです。",
+        "管理者がインストールした後、自分の FlareTune アカウントでプラグインの左側にある「設定」を開きます。そこでコードをスキャンして自分の Xiaomi アカウントに接続し、デバイスを更新・選択してスピーカー出力を有効にしてください。接続とデバイスは FlareTune アカウントごとに分離されます。",
+        "現在対応している XiaoAI スピーカーは L05B で、再生できるのは利用可能な MP3 の曲です。未対応のデバイスや形式は直接再生できません。",
+        "スピーカー出力中は本機の音声をミュートします。キューを続けて再生するにはウェブページを開いたままにしてください。表示される進行状況はウェブプレーヤーに基づき、スピーカーの実測値ではありません。デバイス操作には遅延が生じることがあります。"
+      ]
     },
     "ko": {
       "name": "Xiaomi 스피커",
-      "description": "본인의 Xiaomi 계정을 연결하여 웹 플레이어 오디오를 XiaoAI 스피커로 재생합니다."
+      "description": "본인의 Xiaomi 계정을 연결하여 웹 플레이어 오디오를 XiaoAI 스피커로 재생합니다.",
+      "introduction": [
+        "기존 대기열, 이전·다음 곡과 음량 제어를 유지하면서 웹 플레이어 출력을 XiaoAI 스피커로 전환합니다. 한 번에 선택한 하나의 출력에서만 소리가 납니다.",
+        "관리자가 설치한 뒤 자신의 FlareTune 계정으로 플러그인 왼쪽의 ‘설정’을 여세요. 그 안에서 코드를 스캔하여 본인의 Xiaomi 계정에 연결하고 기기 목록을 새로 고쳐 기기를 선택한 다음 스피커 출력을 켜세요. 연결과 기기는 FlareTune 계정별로 분리됩니다.",
+        "현재 지원하는 XiaoAI 스피커 모델은 L05B이며 재생은 사용 가능한 MP3 곡으로 제한됩니다. 지원하지 않는 기기나 형식은 직접 재생할 수 없습니다.",
+        "스피커 출력이 켜져 있는 동안 이 기기의 오디오는 음소거됩니다. 대기열을 이어서 재생하려면 웹 페이지가 계속 실행되어야 합니다. 표시되는 진행 상황은 웹 플레이어를 기준으로 하며 스피커의 실측 진행 상황이 아닙니다. 기기 제어에 지연이 있을 수 있습니다."
+      ]
     }
   },
   "messages": {

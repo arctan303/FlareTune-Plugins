@@ -9,12 +9,12 @@ export function unwrapManagedLyricsAsset(response) {
     etag: data.etag || data.assetEtag || null, aiCompletionEnabled: data.aiCompletionEnabled === true };
 }
 const empty = () => ({ song: null, asset: null, lyrics: null, etag: null, aiCompletionEnabled: false,
-  loading: false, saving: false, error: '' });
+  loaded: false, loading: false, refreshing: false, saving: false, error: '' });
 const errorMessage = (error, fallback) => error?.status === 409 && error?.code === 'LYRIC_ASSET_CONFLICT'
   ? '歌词文件已在别处更新，已回读最新内容，请重试。' : error?.message || fallback;
 
 export function useManagedLyricsAsset({ host, api, songId, enabled }) {
-  const [state, setState] = React.useState(empty);
+  const [snapshot, setState] = React.useState(empty);
   const [isAiCompleting, setIsAiCompleting] = React.useState(false);
   const ownerRef = React.useRef(null);
   if (!ownerRef.current || ownerRef.current.host !== host || ownerRef.current.songId !== songId || ownerRef.current.enabled !== enabled) {
@@ -22,6 +22,7 @@ export function useManagedLyricsAsset({ host, api, songId, enabled }) {
     ownerRef.current = { host, songId, enabled, active: true, read: 0, saving: false };
   }
   const owner = ownerRef.current;
+  const { owner: snapshotOwner, ...state } = snapshot.owner === owner ? snapshot : empty();
   const current = React.useCallback(() => owner.active && enabled && Boolean(songId) && host.isCurrent(), [owner, enabled, songId, host]);
   const timerRef = React.useRef(null);
   const deadlineRef = React.useRef(0);
@@ -38,11 +39,15 @@ export function useManagedLyricsAsset({ host, api, songId, enabled }) {
   const load = React.useCallback(async ({ quiet = false } = {}) => {
     if (!current()) return null;
     const read = ++owner.read;
-    setState(value => ({ ...value, error: '', loading: quiet ? value.loading : true }));
+    setState(previous => {
+      const value = previous.owner === owner ? previous : empty();
+      return { ...value, owner, error: '', loading: !value.loaded,
+        refreshing: value.loaded && !quiet };
+    });
     try {
       const next = unwrapManagedLyricsAsset(await api.getLyrics(songId));
       if (!current() || read !== owner.read) return null;
-      setState(value => ({ ...value, ...next, loading: false }));
+      setState(value => ({ ...value, owner, ...next, loaded: true, loading: false, refreshing: false }));
       const playing = host.player.getSnapshot().currentSong;
       if (next.song?.language && String(playing?.id) === String(songId) && playing.language !== next.song.language) {
         refreshPlayback(next.song.language);
@@ -50,7 +55,8 @@ export function useManagedLyricsAsset({ host, api, songId, enabled }) {
       return next;
     } catch (error) {
       if (!current() || read !== owner.read) return null;
-      setState(value => ({ ...value, ...empty(), error: errorMessage(error, '读取当前歌词文件失败') }));
+      setState(previous => ({ ...(previous.owner === owner ? previous : empty()), owner,
+        loading: false, refreshing: false, error: errorMessage(error, '读取当前歌词文件失败') }));
       return null;
     }
   }, [api, current, owner, host, refreshPlayback, songId]);
@@ -86,7 +92,7 @@ export function useManagedLyricsAsset({ host, api, songId, enabled }) {
     schedule();
   }, [current, host, load, notify, owner, refreshPlayback, stopPolling]);
   React.useEffect(() => {
-    owner.active = true; setState(empty()); setIsAiCompleting(false);
+    owner.active = true; setState({ ...empty(), owner }); setIsAiCompleting(false);
     if (enabled && songId) void load();
     const retire = () => { owner.active = false; owner.read++; owner.saving = false; stopPolling(); };
     host.signal?.addEventListener('abort', retire, { once: true });
