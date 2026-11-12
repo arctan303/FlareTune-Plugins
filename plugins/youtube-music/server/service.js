@@ -9,7 +9,6 @@ import { fetchTimedLyrics, normalizeTimedLyrics } from "./timed-lyrics.js";
 import { fetchNativeLyrics } from "./native-translation.js";
 import { DEFAULT_YOUTUBE_SETTINGS } from "../shared/preferences.js";
 const metadata = new Map();
-const activeMetadata = new Map();
 function remember(song, hl, region = 'US') {
   if (!song?.sourceId || song.kind !== 'song' || !song.title) return song;
   if (metadata.size >= 200) metadata.delete(metadata.keys().next().value);
@@ -23,6 +22,7 @@ const normalizedLyrics = value => {
     text, attribution: safeText(value?.footer).slice(0, 2000) };
 };
 export function createYouTubeService({ env, credentials, epoch, ctx, services = {}, settings = DEFAULT_YOUTUBE_SETTINGS }) {
+  const activeMetadata = new Map();
   const manager = services.manager || createSessionManager({ env, credentials, epoch, ctx,
     ...(services.createSession ? { createSession: services.createSession } : {}) });
   const player = services.player || createPlayer({ env, manager, ctx });

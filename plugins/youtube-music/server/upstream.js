@@ -6,7 +6,6 @@ Log.setLevel(Log.Level.NONE);
 const guests = new Map();
 const mobileGuests = new Map();
 const iosGuests = new Map();
-const refreshing = new Map();
 const sdkCreate = options => Innertube.create(options);
 const upstreamHosts = new Set(['www.youtube.com', 'music.youtube.com', 'youtubei.googleapis.com', 'oauth2.googleapis.com', 'www.googleapis.com']);
 
@@ -70,6 +69,24 @@ export async function signInNative(session, credentials, cached) {
   return session.oauth.oauth2_tokens;
 }
 export function createSessionManager({ env, credentials, epoch, ctx, createSession = sdkCreate, fetchImpl = upstreamFetch }) {
+  // Only completed anonymous SDK sessions cross requests. An in-flight task's
+  // continuations belong to its initiating Worker request and may be dropped
+  // when that request ends; another request must never inherit that task.
+  const guestWork = new Map(), mobileWork = new Map(), iosWork = new Map(), refreshing = new Map();
+  const cachedSession = async (cache, pending, key, load) => {
+    if (createSession !== sdkCreate) return load();
+    const cached = cache.get(key);
+    if (cached && cached.at > Date.now() - 600000) return cached.value;
+    if (pending.has(key)) return pending.get(key);
+    const work = load().then(value => {
+      if (cache.size >= 8) cache.delete(cache.keys().next().value);
+      cache.set(key, { at: Date.now(), value });
+      return value;
+    });
+    pending.set(key, work);
+    try { return await work; }
+    finally { if (pending.get(key) === work) pending.delete(key); }
+  };
   let scopePromise;
   const scope = () => scopePromise ||= credentialScope(credentials, epoch);
   const tokenKey = async () => 'yt:token:' + await scope();
@@ -88,21 +105,12 @@ export function createSessionManager({ env, credentials, epoch, ctx, createSessi
     scope, tokenKey,
     async guest(hl = 'en', gl = 'US') {
       const options = sessionOptions(hl, gl);
-      // Test factories deliberately bypass the global SDK session cache.
-      if (createSession !== sdkCreate) return create(options);
       const key = JSON.stringify(localeOf(hl, gl));
-      const cached = guests.get(key);
-      if (cached && cached.at > Date.now() - 600000) return cached.promise;
-      const promise = create(options).catch(error => { guests.delete(key); throw error; });
-      if (guests.size >= 8) guests.delete(guests.keys().next().value);
-      guests.set(key, { at: Date.now(), promise });
-      return promise;
+      return cachedSession(guests, guestWork, key, () => create(options));
     },
     async musicMobile(hl = 'en', gl = 'US') {
       const key = JSON.stringify(localeOf(hl, gl));
-      const cached = createSession === sdkCreate && mobileGuests.get(key);
-      if (cached && cached.at > Date.now() - 600000) return cached.promise;
-      const promise = (async () => {
+      return cachedSession(mobileGuests, mobileWork, key, async () => {
         const web = await this.guest(hl, gl);
         const yt = await create({ ...sessionOptions(hl, gl), generate_session_locally: true, fail_fast: true });
         // Never mutate the shared WEB_REMIX metadata session or sign in this
@@ -110,30 +118,18 @@ export function createSessionManager({ env, credentials, epoch, ctx, createSessi
         yt.session.context.client = { ...structuredClone(web.session.context.client),
           clientName: 'ANDROID_MUSIC', clientVersion: MUSIC_LYRICS_CLIENT_VERSION };
         return yt;
-      })();
-      if (createSession !== sdkCreate) return promise;
-      if (mobileGuests.size >= 8) mobileGuests.delete(mobileGuests.keys().next().value);
-      mobileGuests.set(key, { at: Date.now(), promise });
-      promise.catch(() => { if (mobileGuests.get(key)?.promise === promise) mobileGuests.delete(key); });
-      return promise;
+      });
     },
     async musicIos(hl = 'en', gl = 'US') {
       const key = JSON.stringify(localeOf(hl, gl));
-      const cached = createSession === sdkCreate && iosGuests.get(key);
-      if (cached && cached.at > Date.now() - 600000) return cached.promise;
-      const promise = (async () => {
+      return cachedSession(iosGuests, iosWork, key, async () => {
         const web = await this.guest(hl, gl);
         const yt = await create({ ...sessionOptions(hl, gl), generate_session_locally: true, fail_fast: true });
         yt.session.context.client = { ...structuredClone(web.session.context.client), ...MUSIC_IOS_PROFILE, hl, gl };
         for (const field of ['browserName', 'browserVersion', 'configInfo']) delete yt.session.context.client[field];
         yt.session.user_agent = MUSIC_IOS_PROFILE.userAgent;
         return yt;
-      })();
-      if (createSession !== sdkCreate) return promise;
-      if (iosGuests.size >= 8) iosGuests.delete(iosGuests.keys().next().value);
-      iosGuests.set(key, { at: Date.now(), promise });
-      promise.catch(() => { if (iosGuests.get(key)?.promise === promise) iosGuests.delete(key); });
-      return promise;
+      });
     },
     async tv(hl = 'en', extra = {}) {
       const key = await tokenKey();
@@ -147,7 +143,8 @@ export function createSessionManager({ env, credentials, epoch, ctx, createSessi
       catch { throw new YouTubeError('YOUTUBE_CACHE_UNAVAILABLE', 503); }
       if (!token?.access_token || !(Date.parse(token.expiry_date) > Date.now() + 120000)) token = null;
       if (!token) {
-        // Concurrent initial Range/player requests share a refresh operation.
+        // Calls within this request share refresh work; other requests reuse
+        // only completed tokens from KV, never a request-owned promise.
         if (!refreshing.has(key)) {
           const work = signInNative(yt.session, credentials, null).then(async active => {
             await save(active).catch(() => {});

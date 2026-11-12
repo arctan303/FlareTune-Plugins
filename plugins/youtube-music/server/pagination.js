@@ -10,16 +10,28 @@ export function pageOptions(offset = 0, limit = 20) {
 }
 async function cached(map, key, create) {
   const prior = map.get(key);
-  if (prior && prior.at > Date.now() - 300000) return prior.promise;
-  if (map.size >= 12) map.delete(map.keys().next().value);
-  const record = { at: Date.now() };
-  record.promise = create().catch(error => { if (map.get(key) === record) map.delete(key); throw error; });
-  map.set(key, record);
-  return record.promise;
+  if (prior && prior.at > Date.now() - 300000) return snapshot(prior.value);
+  const value = await create();
+  remember(map, key, value);
+  return snapshot(value);
+}
+function snapshot(entry) {
+  return { ...entry, ...(entry.items ? { items: [...entry.items] } : { songs: [...entry.songs] }), work: null };
+}
+function remember(map, key, value) {
+  // Publish completed cursor/data only. Each invocation advances its own copy,
+  // so a canceled owner cannot strand a later request on entry.work.
+  const prior = map.get(key);
+  const count = entry => entry.items?.length ?? entry.songs.length;
+  if (prior && prior.at > Date.now() - 300000 && count(prior.value) > count(value)) return;
+  if (!map.has(key) && map.size >= 12) map.delete(map.keys().next().value);
+  const at = prior && prior.at > Date.now() - 300000 ? prior.at : Date.now();
+  map.set(key, { at, value: snapshot(value) });
 }
 async function extend(entry, end, count, advance) {
   // Every request may fetch at most three additional upstream pages. Concurrent
-  // load-more calls serialize around the same cursor and never advance it twice.
+  // calls on this invocation serialize around its own cursor. Other requests
+  // reuse completed progress but never wait for this invocation's I/O.
   while (entry.work) await entry.work;
   if (count(entry) >= end || !entry.hasMore) return;
   entry.work = (async () => {
@@ -41,6 +53,7 @@ export async function pagedSearch(yt, query, { filter, hl, offset = 0, limit = 2
     value.items.push(...next.items.slice(0, MAX_ITEMS - value.items.length));
     value.hasMore = next.hasMore && value.items.length < MAX_ITEMS;
   });
+  remember(searches, key, entry);
   if (offset >= entry.items.length && entry.hasMore) throw new YouTubeError('YOUTUBE_PAGINATION_RESTART', 409);
   const items = [...entry.items];
   return { sections: entry.sections, items, songs: items.filter(n => n.kind === 'song'),
@@ -76,6 +89,7 @@ export async function pagedArtist(yt, id, { hl, offset = 0, limit = 20, cacheNam
     value.cursor = continuationOf(shelf);
     value.hasMore = Boolean(value.cursor) && value.songs.length < MAX_ITEMS;
   });
+  remember(artists, key, entry);
   if (offset >= entry.songs.length && entry.hasMore) throw new YouTubeError('YOUTUBE_PAGINATION_RESTART', 409);
   return { ...entry.data, songs: [...entry.songs], total: entry.songs.length,
     hasMore: entry.hasMore || entry.songs.length > options.end };
