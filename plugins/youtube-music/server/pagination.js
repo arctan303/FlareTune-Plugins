@@ -1,6 +1,7 @@
 import { YouTubeError } from "./core.js";
 import { artistResult, item, searchResult } from "./normalize.js";
 const searches = new Map(), artists = new Map();
+let nextGeneration = 0;
 const MAX_ITEMS = 1000;
 export function pageOptions(offset = 0, limit = 20) {
   if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100 || offset + limit > MAX_ITEMS) {
@@ -11,7 +12,8 @@ export function pageOptions(offset = 0, limit = 20) {
 async function cached(map, key, create) {
   const prior = map.get(key);
   if (prior && prior.at > Date.now() - 300000) return snapshot(prior.value);
-  const value = await create();
+  const generation = ++nextGeneration;
+  const value = { ...await create(), generation, completedPages: 1, cachedAt: Date.now() };
   remember(map, key, value);
   return snapshot(value);
 }
@@ -21,12 +23,16 @@ function snapshot(entry) {
 function remember(map, key, value) {
   // Publish completed cursor/data only. Each invocation advances its own copy,
   // so a canceled owner cannot strand a later request on entry.work.
+  // Empty/filtered pages still advance the cursor. Compare generation/pages
+  // before item count, and keep the initial timestamp across continuations.
   const prior = map.get(key);
   const count = entry => entry.items?.length ?? entry.songs.length;
-  if (prior && prior.at > Date.now() - 300000 && count(prior.value) > count(value)) return;
+  if (value.cachedAt <= Date.now() - 300000) return;
+  if (prior && (prior.value.generation > value.generation
+    || prior.value.generation === value.generation && (prior.value.completedPages > value.completedPages
+      || prior.value.completedPages === value.completedPages && count(prior.value) > count(value)))) return;
   if (!map.has(key) && map.size >= 12) map.delete(map.keys().next().value);
-  const at = prior && prior.at > Date.now() - 300000 ? prior.at : Date.now();
-  map.set(key, { at, value: snapshot(value) });
+  map.set(key, { at: value.cachedAt, value: snapshot(value) });
 }
 async function extend(entry, end, count, advance) {
   // Every request may fetch at most three additional upstream pages. Concurrent
@@ -35,7 +41,10 @@ async function extend(entry, end, count, advance) {
   while (entry.work) await entry.work;
   if (count(entry) >= end || !entry.hasMore) return;
   entry.work = (async () => {
-    for (let step = 0; step < 3 && count(entry) < end && entry.hasMore; step++) await advance(entry);
+    for (let step = 0; step < 3 && count(entry) < end && entry.hasMore; step++) {
+      await advance(entry);
+      entry.completedPages++;
+    }
   })();
   try { await entry.work; } finally { entry.work = null; }
 }

@@ -158,3 +158,75 @@ test('an artist initial fetch does not lend its unfinished SDK task to another r
     await pagedArtist(yt, 'UCfixture', options); assert.equal(calls, 2);
   } finally { gate.resolve(); }
 });
+
+for (const kind of ['search', 'artist']) test(`${kind} empty continuation pages keep the furthest completed cursor when an older owner finishes late`, async () => {
+  const gate = deferred(), began = deferred(); let blocked = false, initialCalls = 0;
+  const advancedFrom = [];
+  const contents = number => number === 1 ? [row(1)] : number === 8 ? [row(2)]
+    : number % 2 ? [] : [{ video_id: 'filtered', title: 'Unsupported item' }];
+  const advance = async number => {
+    advancedFrom.push(number);
+    if (number === 1 && !blocked) { blocked = true; began.resolve(); await gate.promise; }
+  };
+  const page = number => ({ contents: [{ title: 'Songs', contents: contents(number) }], has_continuation: number < 8,
+    async getContinuation() { await advance(number); return page(number + 1); } });
+  const yt = { music: {
+    async search() { initialCalls++; return page(1); },
+    async getArtist() { initialCalls++; return { header: { title: 'Empty-page fixture' },
+      getAllSongs: async () => ({ contents: contents(1), continuation: '2' }) }; },
+  }, actions: { async execute(_path, { continuation }) {
+    const number = Number(continuation); await advance(number - 1);
+    return { continuation_contents: { contents: contents(number), continuation: number < 8 ? String(number + 1) : null } };
+  } } };
+  const base = { hl: 'en', filter: 'song', cacheNamespace: 'empty-pages-late-' + kind };
+  const read = options => kind === 'search' ? pagedSearch(yt, 'empty-page fixture', { ...base, ...options })
+    : pagedArtist(yt, 'UCemptyPages', { ...base, ...options });
+  const count = value => (kind === 'search' ? value.items : value.songs).length;
+  assert.equal(count(await read({ limit: 1 })), 1);
+  const owner = read({ limit: 2 });
+  try {
+    await began.promise;
+    assert.equal(count(await read({ limit: 2 })), 1); // B completes page 4.
+    assert.equal(count(await read({ limit: 2 })), 1); // C completes page 7.
+    gate.resolve(); await owner; // A completes only page 4, with the same item count.
+    const before = advancedFrom.length;
+    const next = await read({ offset: 1, limit: 1 });
+    assert.equal(count(next), 2);
+    assert.deepEqual(advancedFrom.slice(before), [7]); // Reuse page 7, fetch page 8 once.
+    assert.equal(initialCalls, 1);
+  } finally { gate.resolve(); }
+});
+
+for (const kind of ['search', 'artist']) test(`${kind} cache expiry starts a new generation that late old pages cannot replace`, async t => {
+  let clock = 1_000_000, initialCalls = 0, blocked = false;
+  t.mock.method(Date, 'now', () => clock);
+  const gate = deferred(), began = deferred();
+  const advance = async () => { if (!blocked) { blocked = true; began.resolve(); await gate.promise; } };
+  const page = (generation, number = 1) => ({
+    contents: [{ title: 'Songs', contents: number === 1 ? [{ ...row(1), title: 'Generation ' + generation }] : [] }],
+    has_continuation: true,
+    async getContinuation() { await advance(); return page(generation, number + 1); },
+  });
+  const yt = { music: {
+    async search() { return page(++initialCalls); },
+    async getArtist() { const generation = ++initialCalls; return { header: { title: 'Expiry fixture' },
+      getAllSongs: async () => ({ contents: [{ ...row(1), title: 'Generation ' + generation }], continuation: '2' }) }; },
+  }, actions: { async execute(_path, { continuation }) {
+    await advance(); return { continuation_contents: { contents: [], continuation: String(Number(continuation) + 1) } };
+  } } };
+  const base = { hl: 'en', filter: 'song', cacheNamespace: 'cache-expiry-late-' + kind };
+  const read = limit => kind === 'search' ? pagedSearch(yt, 'expiry fixture', { ...base, limit })
+    : pagedArtist(yt, 'UCexpiryPages', { ...base, limit });
+  const title = value => (kind === 'search' ? value.items : value.songs)[0].title;
+  assert.equal(title(await read(1)), 'Generation 1');
+  const owner = read(2);
+  try {
+    await began.promise;
+    clock += 299_999;
+    assert.equal(title(await read(1)), 'Generation 1'); assert.equal(initialCalls, 1);
+    clock += 2; // A hit above must not slide the five-minute TTL.
+    assert.equal(title(await read(1)), 'Generation 2'); assert.equal(initialCalls, 2);
+    gate.resolve(); await owner;
+    assert.equal(title(await read(1)), 'Generation 2'); assert.equal(initialCalls, 2);
+  } finally { gate.resolve(); }
+});
