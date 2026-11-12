@@ -60,12 +60,13 @@ test('stable catalog retains API2 choices alongside the pure API3 combination an
   await validateArtifacts(catalog);
 });
 
-test('permanent development catalog, when present, keeps all thirteen tested identities and content-addressed artifacts',async()=>{
+test('permanent development catalog, when present, preserves the original tested entries and adds immutable YT 0.2.2',async()=>{
   let catalog;
   try {catalog=await readCatalog('catalogs/development.json');} catch(error){if(error.code==='ENOENT')return;throw error;}
   const original=await readCatalog('catalogs/health-ai-ownership-20261111.json');
-  assert.equal(catalog.plugins.length,13);
-  assert.deepEqual(catalog.plugins,original.plugins);
+  assert.equal(catalog.plugins.length,14);
+  for (const previous of original.plugins) assert.deepEqual(catalog.plugins.find(row=>key(row)===key(previous)),previous);
+  assert.ok(catalog.plugins.some(row=>key(row)==='youtube-music@0.2.2'));
   assert.ok(catalog.plugins.some(row=>key(row)==='lyrics-workbench@0.3.1'));
   assert.ok(catalog.plugins.some(row=>key(row)==='youtube-music@0.2.1'));
   await validateArtifacts(catalog);
