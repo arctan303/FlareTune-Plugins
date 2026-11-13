@@ -436,7 +436,7 @@ export async function runLyricAssetAiCompletion({ env, db, song, store, startedA
       const compact = (config.source || config.provider) === 'deepseek' && ['deepseek-flash', 'deepseek-v4-pro'].includes(config.model);
       const batches = translateLyrics ? validateCompletion(() => buildTranslationBatches(units, song.title, song.artist,
         { targetLanguage, referenceByUnitId, ...(compact ? { maxUnits: 40 } : {}) }), 'setup') : [{ units, messages: [
-        { role: 'system', content: 'Perform only the explicitly requested lyric cleanup. Return exactly {"discardLineIndices":[0]}; no translations, language assessment or other fields.\n' + CLEANUP_INSTRUCTION },
+        { role: 'system', content: 'Perform only the explicitly requested lyric cleanup. Return exactly this JSON object: {"discardLineIndices":[0]}; no translations, language assessment or other fields.\n' + CLEANUP_INSTRUCTION },
         { role: 'user', content: JSON.stringify({ cleanupUnits: selectedCleanup }) },
       ] }];
       let retriedInvalidJson = false;

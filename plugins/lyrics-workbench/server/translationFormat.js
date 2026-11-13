@@ -29,7 +29,7 @@ function createSystemPrompt(targetLanguage = 'en') {
 4. 连贯：跨行语义要参考上下文，每个 text 仍只承载对应原行，不合并或拆分单元。
 目标书写要求：${script}
 
-严格规则：歌曲需要翻译已由上游独立确定，本角色只翻译，不重新判断语言或是否需要翻译。只处理 units；context、title、artist 仅供理解。referenceTranslations 可能有误，原文始终优先。返回且仅返回 {"translations":[{"unitId":0,"text":"译文"}]}，与 units 等长，每个 unitId 恰好出现一次。不得返回songLanguage、unitLanguages、segments或notNeeded。不得输出时间戳、Markdown、署名、解释或多余段落，不修改原文或时间。名字、口号与拟声可按目标语言语境保留，但不能把整份外语正文原样返回。`;
+严格规则：歌曲需要翻译已由上游独立确定，本角色只翻译，不重新判断语言或是否需要翻译。只处理 units；context、title、artist 仅供理解。referenceTranslations 可能有误，原文始终优先。返回且仅返回 JSON 对象 {"translations":[{"unitId":0,"text":"译文"}]}，与 units 等长，每个 unitId 恰好出现一次。不得返回songLanguage、unitLanguages、segments或notNeeded。不得输出时间戳、Markdown、署名、解释或多余段落，不修改原文或时间。名字、口号与拟声可按目标语言语境保留，但不能把整份外语正文原样返回。`;
 }
 
 export function buildTranslationPrompt(
