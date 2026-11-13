@@ -1,7 +1,7 @@
 {
   "id": "lyrics-workbench",
-  "version": "0.2.1",
-  "hostApiVersion": 3,
+  "version": "1.0.0",
+  "hostApiVersion": 5,
   "apiVersion": 1,
   "dataVersion": 0,
   "name": "歌词工作台",
@@ -18,23 +18,48 @@
   "metadata": {
     "zh": {
       "name": "歌词工作台",
-      "description": "查看、选择和编辑歌词；安装 AI 网关后可使用 AI 辅助功能。"
+      "description": "查看、选择和编辑歌词；安装 AI 网关后可使用 AI 辅助功能。",
+      "introduction": [
+        "围绕当前歌曲查看歌词、比较候选版本，并进行文本校对、时间调整和歌词文件导入导出。已有逐行或逐字歌词可以继续查看和管理。",
+        "先播放或选择一首歌曲，再进入当前歌词或候选歌词页。基础查看和编辑无需 AI 网关；若要使用 AI 功能，管理员需在网关左侧“设置”中配置连接，并在本插件左侧“设置”中配置一次模型。开启歌词 AI 后，缺少语种的歌词先识别主要语言，需要翻译时自动在后台补译；已有可用译文直接复用。",
+        "歌词和译文是同一首歌供站点成员共用的结果，管理员保存会影响其他成员。编辑及编辑中的 AI 结果先留在草稿，检查并最终保存后才写入共享歌词；成员可以查看现有结果。"
+      ]
     },
     "zh-Hant": {
       "name": "歌詞工作台",
-      "description": "檢視、選擇和編輯歌詞；安裝 AI 閘道後可使用 AI 輔助功能。"
+      "description": "檢視、選擇和編輯歌詞；安裝 AI 閘道後可使用 AI 輔助功能。",
+      "introduction": [
+        "圍繞目前歌曲查看歌詞、比較候選版本，並進行文字校對、時間調整與歌詞檔案匯入匯出。既有逐行或逐字歌詞可繼續查看與管理。",
+        "先播放或選擇一首歌曲，再進入目前歌詞或候選歌詞頁。基本查看與編輯無須 AI 閘道；若要使用 AI 功能，管理員須在閘道左側「設定」中設定連線，並在本外掛左側「設定」中設定一次模型。開啟歌詞 AI 後，缺少語種的歌詞先辨識主要語言，需要翻譯時自動在背景補譯；已有可用譯文直接沿用。",
+        "歌詞與譯文是同一首歌供站點成員共用的結果，管理員儲存會影響其他成員。編輯及編輯中的 AI 結果先保留在草稿，檢查並最終儲存後才寫入共用歌詞；成員可以查看既有結果。"
+      ]
     },
     "en": {
       "name": "Lyrics workspace",
-      "description": "View, choose and edit lyrics, with optional AI assistance through the AI gateway."
+      "description": "View, choose and edit lyrics, with optional AI assistance through the AI gateway.",
+      "introduction": [
+        "Inspect lyrics for the current song, compare candidate versions, correct text, adjust timing and import or export lyric files. Existing line-timed and word-timed lyrics remain available to view and manage.",
+        "Play or select a song, then open Current lyrics or Lyric candidates. Basic viewing and editing do not require AI gateway. To use AI, an administrator configures a connection in the gateway's Settings and chooses one model in this plugin's Settings. When Lyrics AI is enabled, it identifies the dominant language where a language tag is missing and prepares needed translations in the background. Usable existing translations are reused.",
+        "Lyrics and translations are shared song assets used by site members, so an administrator's save affects other listeners. Edits and AI results produced while editing stay in the draft until reviewed and finally saved to the shared lyrics. Members can view existing results."
+      ]
     },
     "ja": {
       "name": "歌詞ワークスペース",
-      "description": "歌詞を表示、選択、編集します。AI ゲートウェイをインストールすると AI 支援も使えます。"
+      "description": "歌詞を表示、選択、編集します。AI ゲートウェイをインストールすると AI 支援も使えます。",
+      "introduction": [
+        "現在の曲の歌詞を確認し、候補を比較して、テキストの修正、タイミングの調整、歌詞ファイルの読み込み・書き出しを行えます。既存の行単位・単語単位の同期歌詞も確認・管理できます。",
+        "まず曲を再生または選択し、現在の歌詞または歌詞候補のページを開きます。基本的な表示と編集に AI ゲートウェイは不要です。AI を使う場合は、管理者がゲートウェイの「設定」で接続を、このプラグインの「設定」でモデルを一度設定します。歌詞 AI を有効にすると、言語タグがない歌詞の主要言語を判定し、必要な翻訳をバックグラウンドで作成します。利用できる既存の翻訳は再利用します。",
+        "歌詞と翻訳は同じ曲を聴くサイトメンバーで共有されるため、管理者の保存は他のメンバーにも反映されます。編集内容と編集中の AI 結果は下書きに留まり、確認して最終保存した時点で共有歌詞に書き込まれます。メンバーは既存の結果を閲覧できます。"
+      ]
     },
     "ko": {
       "name": "가사 작업 공간",
-      "description": "가사를 보고 선택하고 편집합니다. AI 게이트웨이를 설치하면 AI 보조 기능도 사용할 수 있습니다."
+      "description": "가사를 보고 선택하고 편집합니다. AI 게이트웨이를 설치하면 AI 보조 기능도 사용할 수 있습니다.",
+      "introduction": [
+        "현재 곡의 가사를 확인하고 후보 버전을 비교하며 텍스트 교정, 시간 조정과 가사 파일 가져오기·내보내기를 할 수 있습니다. 기존의 줄 단위 및 단어 단위 동기화 가사도 확인하고 관리할 수 있습니다.",
+        "먼저 곡을 재생하거나 선택한 다음 현재 가사 또는 가사 후보 페이지를 여세요. 기본 보기와 편집에는 AI 게이트웨이가 필요하지 않습니다. AI를 사용하려면 관리자가 게이트웨이의 ‘설정’에서 연결을 구성하고 이 플러그인의 ‘설정’에서 모델을 한 번 선택합니다. 가사 AI를 켜면 언어 태그가 없는 가사의 주 언어를 판단하고 필요한 번역을 백그라운드에서 생성합니다. 사용할 수 있는 기존 번역은 그대로 활용합니다.",
+        "가사와 번역은 같은 곡을 듣는 사이트 구성원이 공유하므로 관리자가 저장하면 다른 구성원에게도 반영됩니다. 편집 내용과 편집 중 생성한 AI 결과는 초안에 남으며, 확인 후 최종 저장해야 공유 가사에 기록됩니다. 구성원은 기존 결과를 볼 수 있습니다."
+      ]
     }
   },
   "messages": {
@@ -49,7 +74,17 @@
       "tools": "文件与管理",
       "candidates": "候选歌词",
       "clear": "清空对话",
-      "name": "歌词工作台"
+      "name": "歌词工作台",
+      "policy": "歌词策略",
+      "onlineEnabled": "联网获取歌词",
+      "lyricPreference": "歌词偏好",
+      "preferWord": "逐字优先",
+      "preferLine": "逐行即可",
+      "aiCompletion": "歌词 AI",
+      "enabled": "已启用",
+      "off": "关闭",
+      "onlineDisabled": "联网获取歌词已关闭",
+      "translationFailed": "歌词翻译失败，请重试。"
     },
     "zh-Hant": {
       "gateway": "AI 閘道",
@@ -62,7 +97,17 @@
       "tools": "檔案與管理",
       "candidates": "候選歌詞",
       "clear": "清空對話",
-      "name": "歌詞工作台"
+      "name": "歌詞工作台",
+      "policy": "歌詞策略",
+      "onlineEnabled": "連網取得歌詞",
+      "lyricPreference": "歌詞偏好",
+      "preferWord": "逐字優先",
+      "preferLine": "逐行即可",
+      "aiCompletion": "歌詞 AI",
+      "enabled": "已啟用",
+      "off": "關閉",
+      "onlineDisabled": "連網取得歌詞已關閉",
+      "translationFailed": "歌詞翻譯失敗，請重試。"
     },
     "en": {
       "gateway": "AI gateway",
@@ -75,7 +120,17 @@
       "tools": "Files and management",
       "candidates": "Lyric candidates",
       "clear": "Clear conversation",
-      "name": "Lyrics workspace"
+      "name": "Lyrics workspace",
+      "policy": "Lyric policy",
+      "onlineEnabled": "Fetch lyrics online",
+      "lyricPreference": "Lyric preference",
+      "preferWord": "Prefer word timing",
+      "preferLine": "Line timing is enough",
+      "aiCompletion": "Lyrics AI",
+      "enabled": "Enabled",
+      "off": "Off",
+      "onlineDisabled": "Online lyric retrieval is disabled",
+      "translationFailed": "Could not translate the lyrics. Please try again."
     },
     "ja": {
       "gateway": "AI ゲートウェイ",
@@ -88,7 +143,17 @@
       "tools": "ファイルと管理",
       "candidates": "歌詞候補",
       "clear": "会話を消去",
-      "name": "歌詞ワークスペース"
+      "name": "歌詞ワークスペース",
+      "policy": "歌詞の設定",
+      "onlineEnabled": "オンラインで歌詞を取得",
+      "lyricPreference": "歌詞の優先設定",
+      "preferWord": "単語ごとの同期を優先",
+      "preferLine": "行ごとの同期で十分",
+      "aiCompletion": "歌詞 AI",
+      "enabled": "有効",
+      "off": "オフ",
+      "onlineDisabled": "オンライン歌詞取得は無効です",
+      "translationFailed": "歌詞を翻訳できませんでした。再試行してください。"
     },
     "ko": {
       "gateway": "AI 게이트웨이",
@@ -101,7 +166,17 @@
       "tools": "파일 및 관리",
       "candidates": "가사 후보",
       "clear": "대화 지우기",
-      "name": "가사 작업 공간"
+      "name": "가사 작업 공간",
+      "policy": "가사 정책",
+      "onlineEnabled": "온라인 가사 가져오기",
+      "lyricPreference": "가사 기본 설정",
+      "preferWord": "단어 동기화 우선",
+      "preferLine": "줄 동기화로 충분",
+      "aiCompletion": "가사 AI",
+      "enabled": "사용 중",
+      "off": "끄기",
+      "onlineDisabled": "온라인 가사 가져오기가 꺼져 있습니다",
+      "translationFailed": "가사를 번역하지 못했습니다. 다시 시도해 주세요."
     }
   },
   "capabilityRoles": [

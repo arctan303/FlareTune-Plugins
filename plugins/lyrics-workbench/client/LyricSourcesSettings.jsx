@@ -2,13 +2,15 @@ import React from 'react';
 import { Plus, Edit3, Trash2 } from 'lucide-react';
 import { t, DEFAULT_LYRIC_CHANNELS, MAX_LYRIC_SOURCES, normalizeLyricChannels,
   SettingsSection as Section, SettingsEditDialog, InfoTip, SettingsButton, SettingsActions, SettingsToggle,
-  SettingsInput, SettingsTextarea, useSettingsReadOnly, SelectControl, ALL_LANGUAGES, getLanguageLabel } from "@flaretune/plugin-sdk";
+  SettingsInput, SettingsTextarea, useSettingsReadOnly, SelectControl, useLocale } from "@flaretune/plugin-sdk";
+import { TRANSLATION_TARGETS, translationTargetLabel, installationTranslationTarget } from '../shared/translation-languages.js';
 import LyricSourceQuickTest from "./LyricSourceQuickTest.jsx";
 
 const inputClass = 'w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3.5 py-2.5 text-sm text-[var(--ink)] outline-none focus:border-[var(--accent)]';
 const cardClass = 'wallpaper-content-surface rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4 space-y-3';
 
-export default function LyricSourcesSettings({ setting, host, onSaved }) {
+export default function LyricSourcesSettings({ setting, host, onSaved, onlineEnabled = true }) {
+  const locale = useLocale();
   const current = setting || { value: DEFAULT_LYRIC_CHANNELS, revision: 0 };
   const value = React.useMemo(() => normalizeLyricChannels(current.value, { migrateLegacy: true }), [current.value]);
   const readOnly = useSettingsReadOnly();
@@ -21,7 +23,7 @@ export default function LyricSourcesSettings({ setting, host, onSaved }) {
     setMessage('');
     setEditor({ isNew: !source, revision: current.revision, snapshot: structuredClone(value),
       value: source ? { ...source } : { id: 'lyric_' + crypto.randomUUID().replaceAll('-', ''), name: '', note: '',
-        protocol: 'custom_krc', enabled: true, searchUrl: '', downloadUrl: '', translationLanguage: 'zh' } });
+        protocol: 'custom_krc', enabled: true, searchUrl: '', downloadUrl: '', translationLanguage: installationTranslationTarget(locale) } });
   }
   const close = () => { if (!locked) { setEditor(null); setMessage(''); } };
   const change = (key, next) => setEditor(previous => ({ ...previous, value: { ...previous.value, [key]: next } }));
@@ -109,20 +111,21 @@ export default function LyricSourcesSettings({ setting, host, onSaved }) {
         <label className="block space-y-1.5 text-xs font-semibold"><span>{t('备注')}</span>
           <SettingsTextarea className={inputClass} rows={2} maxLength={500} disabled={locked} value={editor.value.note} onChange={event => change('note', event.target.value)} />
         </label>
-        {['searchUrl', 'downloadUrl'].map(field => <label key={field} className="block space-y-1.5 text-xs text-[var(--ink)]">
+        {['searchUrl', 'downloadUrl'].map(field => <div key={field} className="space-y-1.5 text-xs text-[var(--ink)]">
           <span className="inline-flex items-center gap-1.5 font-semibold">
-            <span>{t(field === 'searchUrl' ? '搜索接口地址' : '下载接口地址')}</span>
+            <label htmlFor={`${editor.value.id}-${field}`}>{t(field === 'searchUrl' ? '搜索接口地址' : '下载接口地址')}</label>
             {field === 'searchUrl' && <InfoTip text={t('自定义接口须符合歌词源协议，仅支持 HTTPS 地址。')} />}
           </span>
-          <SettingsInput className={inputClass} type="url" maxLength={2048} required={editor.isNew || editor.value.enabled} disabled={locked} value={editor.value[field]}
+          <SettingsInput id={`${editor.value.id}-${field}`} aria-label={t(field === 'searchUrl' ? '搜索接口地址' : '下载接口地址')}
+            className={inputClass} type="url" maxLength={2048} required={editor.isNew || editor.value.enabled} disabled={locked} value={editor.value[field]}
             placeholder={'https://lyrics.example.com/' + (field === 'searchUrl' ? 'search' : 'download')} onChange={event => change(field, event.target.value)} />
-        </label>)}
+        </div>)}
         <label className="block space-y-1.5 text-xs text-[var(--ink)]"><span className="font-semibold">{t('来源译文语言')}</span>
           <SelectControl aria-label={t('来源译文语言')} className={inputClass} value={editor.value.translationLanguage} disabled={locked} onChange={event => change('translationLanguage', event.target.value)}>
-            {ALL_LANGUAGES.filter(language => !['instrumental', 'other'].includes(language.code)).map(language => <option key={language.code} value={language.code}>{getLanguageLabel(language.code)}</option>)}
+            {TRANSLATION_TARGETS.map(code => <option key={code} value={code}>{translationTargetLabel(code, locale)}</option>)}
           </SelectControl>
         </label>
-        <LyricSourceQuickTest source={editor.value} host={host} busy={busy} onTesting={setTesting} />
+        <LyricSourceQuickTest source={editor.value} host={host} busy={busy || !onlineEnabled} onTesting={setTesting} />
         <SettingsActions className="pt-2 border-t border-[var(--line)]"><SettingsButton closeDialog disabled={locked}>{t('取消')}</SettingsButton><SettingsButton type="submit" variant="primary" disabled={locked}>{t(busy ? '正在保存…' : '保存')}</SettingsButton></SettingsActions>
       </form>
       {!editor.isNew && <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--line)] pt-4">

@@ -48,14 +48,17 @@ test('stable catalog preserves every previously published entry, including its m
   }
 });
 
-test('stable catalog retains every baseline identity and adds only the API4 YouTube release',async()=>{
+test('stable catalog retains every baseline identity and its explicitly declared additions',async()=>{
   const catalog=await readCatalog('repository.json');
   const baseline=await readCatalog('tooling/catalog-baselines.json');
-  assert.equal(catalog.plugins.length,Object.keys(baseline.stable).length+1);
+  const additions=baseline.stableAdditions || ['youtube-music@0.2.4'];
+  assert.equal(catalog.plugins.length,Object.keys(baseline.stable).length+additions.length);
   for(const [identity,digest] of Object.entries(baseline.stable)) {
     assert.equal(sha(JSON.stringify(canonical(catalog.plugins.find(row=>key(row)===identity)))),digest,identity);
   }
-  assert.deepEqual([...new Set(catalog.plugins.map(row=>row.manifest.hostApiVersion))].sort(),[2,3,4]);
+  for(const identity of additions) assert.ok(catalog.plugins.some(row=>key(row)===identity),identity);
+  assert.deepEqual([...new Set(catalog.plugins.map(row=>row.manifest.hostApiVersion))].sort(),
+    additions.includes('lyrics-workbench@1.0.0') ? [2,3,4,5] : [2,3,4]);
   for(const [id,version] of Object.entries({'ai-gateway':'0.2.1',assistant:'0.2.0','lyrics-workbench':'0.2.1',roam:'0.1.1','xiaomi-speaker':'1.1.1','youtube-music':'0.1.1'})) {
     assert.ok(catalog.plugins.some(row=>row.manifest.id===id&&row.manifest.version===version));
   }
@@ -73,7 +76,8 @@ test('development catalog preserves every previous entry and its explicitly adde
     assert.equal(sha(JSON.stringify(canonical(catalog.plugins.find(row=>key(row)===identity)))),digest,identity);
   }
   for(const identity of baseline.developmentAdditions) {
-    assert.equal(catalog.plugins.find(row=>key(row)===identity).manifest.hostApiVersion,4);
+    assert.equal(catalog.plugins.find(row=>key(row)===identity).manifest.hostApiVersion,
+      ['lyrics-workbench@0.9.0','lyrics-workbench@0.9.1','lyrics-workbench@1.0.0'].includes(identity) ? 5 : 4);
   }
   assert.ok(catalog.plugins.some(row=>key(row)==='lyrics-workbench@0.3.1'));
   assert.ok(catalog.plugins.some(row=>key(row)==='youtube-music@0.2.1'));

@@ -46,8 +46,8 @@ export function createLyricsWorkspaceApi(host) {
     shiftLyricsTimeline: (songId, { deltaMs, etag }) => request(`${path(songId)}/timeline`, { method: 'PATCH', body: { deltaMs, etag } }),
     saveLyricsDocument: (songId, { lines, etag, aiReceipt, translationLanguage }) => request(`${path(songId)}/document`, {
       method: 'PUT', body: { lines, etag, ...(aiReceipt ? { aiReceipt } : {}), ...(translationLanguage ? { translationLanguage } : {}) } }),
-    completeDraftLyrics: (songId, { lines, etag, translationLanguage }) => request(`${path(songId)}/draft-ai`, {
-      method: 'POST', body: { lines, etag, ...(translationLanguage ? { translationLanguage } : {}) } }),
+    completeDraftLyrics: (songId, { lines, etag, translationLanguage, cleanDirtyLyrics = false }) => request(`${path(songId)}/draft-ai`, {
+      method: 'POST', body: { lines, etag, cleanDirtyLyrics, ...(translationLanguage ? { translationLanguage } : {}) } }),
     importLyricsLrc: (songId, { lrc, etag }) => request(`${path(songId)}/import`, { method: 'POST', body: { lrc, etag } }),
     restoreLyricsBackup: (songId, { asset, etag }) => request(`${path(songId)}/restore`, { method: 'POST', body: { asset, etag } }),
     resetLyrics: (songId, etag = null) => request(path(songId), { method: 'DELETE', body: { etag } }),

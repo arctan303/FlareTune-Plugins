@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { hookComponent, nodes, button, flushAsync } from '../../../tests/lyricCandidateHarness.js';
 import * as editor from './editor.js';
 import * as shift from './timelineShift.js';
+import { workbenchMessage } from '../shared/messages.js';
 
 test('workspace retains imported and existing translation language, switching it only after AI redo', async () => {
   const saves = [], aiRequests = [];
@@ -20,7 +21,7 @@ test('workspace retains imported and existing translation language, switching it
   const modules = {
     '../../../shared/lyricSources.js': { lyricSourceLabel: x => x }, '@flaretune/plugin-sdk/client/i18n': { t: x => x },
     './SettingsReadOnly.jsx': { SettingsInput: 'input', useSettingsReadOnly: () => false },
-    '@flaretune/plugin-sdk': { t: x => x, lyricSourceLabel: x => x, SettingsInput: 'input', useSettingsReadOnly: () => false,
+    '@flaretune/plugin-sdk': { t: x => x, useLocale: () => 'zh', lyricSourceLabel: x => x, SettingsInput: 'input', SettingsToggle: 'toggle', useSettingsReadOnly: () => false,
         SyncedLyricText: 'SyncedLyricText', ProgressBar: 'ProgressBar', PageBackButton: 'PageBackButton' },
       './useHostPlayer.js': { useHostPlayer: () => ({ currentSong: null, currentTime: 0, duration: 200 }) },
       './LyricsSettings.jsx': 'LyricsSettings',
@@ -38,7 +39,7 @@ test('workspace retains imported and existing translation language, switching it
     '../utils/navigation.js': { formatPath: () => '/lyrics/s1', syncBrowserHistory() {}, returnToOriginRoute() {} },
     './lyrics/SyncedLyricText.jsx': 'SyncedLyricText', './playerbar/ProgressBar.jsx': 'ProgressBar',
     './PageBackButton.jsx': 'PageBackButton', './editor.js': editor,
-    './previewScroll.js': {}, './timelineShift.js': shift, './workspace.css': {},
+    './previewScroll.js': {}, './timelineShift.js': shift, './workspace.css': {}, '../shared/messages.js': { workbenchMessage },
   };
   const component = hookComponent({ file: fileURLToPath(new URL('./LyricsPluginPage.jsx', import.meta.url)),
     exportName: 'LyricsWorkspaceContent', modules, globals: { window: { confirm: () => true, addEventListener() {}, removeEventListener() {} } } });

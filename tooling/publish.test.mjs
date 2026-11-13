@@ -228,7 +228,7 @@ test('consumer imports cannot name a provider private credential module', async 
   await assert.rejects(createArtifact('sample', { root }));
 });
 
-for (const hostApiVersion of [2, 3, 4]) {
+for (const hostApiVersion of [2, 3, 4, 5]) {
   test('schema-2 publisher preserves the minimum host API requirement: ' + hostApiVersion, async t => {
     const { root, base } = await fixture(t);
     const file = resolve(base, 'manifest.json');
@@ -246,7 +246,7 @@ test('publisher rejects unsupported minimum host API values without reinterpreti
   const { root, base } = await fixture(t);
   const file = resolve(base, 'manifest.json');
   const manifest = JSON.parse(await readFile(file, 'utf8'));
-  for (const hostApiVersion of [0, 1, 5, '2', '3', '4', null]) {
+  for (const hostApiVersion of [0, 1, 6, '2', '3', '4', '5', null]) {
     await writeFile(file, JSON.stringify({ ...manifest, hostApiVersion }));
     await assert.rejects(createArtifact('sample', { root }), { code: 'PUBLISH_MANIFEST_INVALID' });
   }

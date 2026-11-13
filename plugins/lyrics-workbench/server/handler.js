@@ -1,3 +1,4 @@
+import { workbenchMessage } from '../shared/messages.js';
 import { createPluginOperationLease } from "@flaretune/plugin-sdk/server/service-leases";
 import { handleLyricsWorkbenchRoute } from "./workspace.js";
 import { getAdminSettings, updateAdminSetting } from "./settings.js";
@@ -5,6 +6,7 @@ import { InstanceAdminError } from "@flaretune/plugin-sdk/server/admin-common";
 import { readBoundedJson } from "@flaretune/plugin-sdk/server/http-security";
 import { testLyricSource } from "./sourceTest.js";
 import { handleLyricsModelRoute } from './modelRoutes.js';
+import { loadLyricAiProcessingSettings } from './config.js';
 
 const memberAction = (path, method) => method === 'GET'
   || method === 'POST' && ['/candidates/inspect', '/ai-completion'].some(suffix => path.endsWith(suffix));
@@ -23,6 +25,7 @@ export function createLyricsWorkbenchHandler(env, session, { executionContext, d
         const key = path === '/sources-settings' ? 'lyrics.sources' : 'lyrics.ai';
         if (path === '/source-test') {
           if (request.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
+          if (!(await loadLyricAiProcessingSettings(db)).onlineEnabled) return json({ error: 'LYRIC_ONLINE_DISABLED', message: workbenchMessage('onlineDisabled', context.locale || context.language) }, 409);
           const fetchImpl = dependencies.sourceTestDeps?.fetchImpl || fetch;
           result = await (dependencies.testSource || testLyricSource)(db, context.identity.accountId,
             await readBoundedJson(request, 32 * 1024), { ...dependencies.sourceTestDeps, signal: request.signal,

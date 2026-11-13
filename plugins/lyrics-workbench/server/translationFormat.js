@@ -6,44 +6,30 @@ export {
   parseLrcLines,
 } from "@flaretune/plugin-sdk/server/lyric-parsing";
 
+import { isTranslationTarget, normalizeTranslationTarget, targetScriptEvidence, isUnchangedTranslation, translationTargetEnglishName } from '../shared/translation-languages.js';
 import { computeHash } from "@flaretune/plugin-sdk/server/lyric-parsing";
-import { isValidSongLanguage } from "@flaretune/plugin-sdk/server/song-language";
 
 const LRC_TIMESTAMP_ANY_PATTERN = /\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?\]/;
-const HAN_ANY_PATTERN = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
-const MEANINGFUL_FOREIGN_PATTERN = /[A-Za-z\u3040-\u30ff\u31f0-\u31ff\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]/;
-const TRANSLATION_PROMPT_VERSION = 'lyrics-zh-cn-v5-contextual-polish';
+const TRANSLATION_PROMPT_VERSION = 'lyrics-1.0.0-translation';
 const DEFAULT_MAX_BATCH_UNITS = 120;
 const DEFAULT_MAX_BATCH_CHARACTERS = 12_000;
 const DEFAULT_CONTEXT_UNITS = 4;
-const LANGUAGE_NAMES = Object.freeze({ zh: '简体中文', ja: '日语', en: '英语', ko: '韩语',
-  ru: '俄语', es: '西班牙语', fr: '法语', de: '德语', sv: '瑞典语', vi: '越南语',
-  yue: '粤语', it: '意大利语', th: '泰语', pt: '葡萄牙语' });
+function createSystemPrompt(targetLanguage = 'en') {
+  if (!isTranslationTarget(targetLanguage)) throw new Error('INVALID_TARGET_LANGUAGE');
+  const target = translationTargetEnglishName(targetLanguage);
+  const script = targetLanguage === 'zh' ? '使用简体中文；不要输出繁体字。'
+    : targetLanguage === 'zh-Hant' ? '使用繁體中文；不要輸出簡體字。'
+      : targetLanguage === 'ja' ? '日本語として自然な語順・表記・慣用表現を使い、固有名詞は文脈に応じて扱う。'
+        : targetLanguage === 'ko' ? '자연스러운 한국어 어순과 표현을 사용하고 적절한 한글 표기를 유지한다.'
+          : 'Use the target language’s natural grammar, vocabulary, idioms and writing conventions.';
+  return `你是一位资深歌词译者与编辑。请把 units 中实际演唱的歌词译成 ${target}（${targetLanguage}）。结合 title、artist 和相邻 context 理解整首歌，但不得把资料当歌词。以信、达、雅为共同质量标准，所有目标语言遵循同一要求：
+1. 忠实：保留主体、否定、时态、指代、意象、情绪和叙事关系，不擅自增删。
+2. 自然：使用目标语言习惯的语序和省略，避免逐词硬译、机械重复和原语言残句。
+3. 表达：在不改变原意的前提下保留歌词语气、修辞、节奏与诗性。
+4. 连贯：跨行语义要参考上下文，每个 text 仍只承载对应原行，不合并或拆分单元。
+目标书写要求：${script}
 
-function createSystemPrompt(targetLanguage = 'zh') {
-  if (targetLanguage !== 'zh') {
-    const target = LANGUAGE_NAMES[targetLanguage];
-    if (!target) throw new Error('INVALID_TARGET_LANGUAGE');
-    return `你是一位资深歌词译者。请结合 title、artist 与相邻 context 理解整首歌，把 units 中实际演唱的歌词译成${target}（${targetLanguage}）。译文要忠实于原意、自然通顺，并尽量保留语气、意象和节奏；不得增加解释或编造信息。referenceTranslations 若存在，仅供理解，可能有错，必须以原文为准。\n\n只输出 JSON：若歌词已经主要是目标语言且无须翻译，返回 {"notNeeded":true}；否则返回 {"translations":[{"unitId":0,"text":"译文"}]}。translations 与 units 等长，每个 unitId 恰好出现一次。不得输出时间戳、Markdown、署名或额外文字。`;
-  }
-  return `你是一位资深中文歌词译者与编辑。请先结合整首歌的 title、artist 和前后 context 理解每句在完整语义中的作用，在内部完成“理解—初译—中文润色”后，只输出最终译文。把 units 中的实际歌词译成简体中文，并以“信、达、雅”为顺序：
-1. 信：忠实保留主体、否定、时态、指代、意象、情绪与叙事关系，不擅自增删信息。
-2. 达：按中文习惯重组词序和省略重复成分，译成可以自然朗读的完整表达；禁止逐词对应、生硬欧化、日语残句或“更更更加”一类机械叠词。
-3. 雅：在不改变原意的前提下保留歌词的语气、节奏、修辞与诗性，优先选择凝练、贴合当代中文语境的措辞。
-4. 连贯：跨行组成一句话时必须结合相邻行理解，每个 text 仍只承载对应原行的语义片段，但上下行连读要通顺。
-
-严格规则：
-1. 只翻译 units；context、title、artist 仅用于理解，不得输出或翻译。
-2. 若 units 的实际歌词已经以中文为主、无需翻译，只返回 {"notNeeded":true}；不得复制、改写或逐行输出中文。否则只返回 {"translations":[{"unitId":0,"text":"译文"}]} 形式的 JSON 对象。
-3. 非 notNeeded 响应的 translations 必须与 units 等长，每个 unitId 恰好出现一次，不得缺失、重复或越界。
-4. text 必须非空，不得包含 LRC 时间戳、Markdown、解释、评论、歌曲资料或额外段落。
-5. 英文口号、拟声和人声吟唱在中文语境中自然时可以保留原文，不得为了“看起来已翻译”而硬译，也不得删除该单元。
-6. 同一修辞词连续重复时，用自然的中文反复或递进表达保留强调，不要机械逐字重复。
-
-润色示例只用于展示中文质量，不得额外输出：
-- “もっともっともっと声高く”宜译为“把歌声再唱得更响亮”，不要译成“更加更加更加高声”。
-- 相邻两行“だって今強く / 深く愛してるから”宜连贯处理为“因为此刻 / 我正爱得如此热烈而深沉”，不要留下“因为现在强烈地”这样的逐词残句。
-- “くちびるに希望 携えて / ワード放つそのたび”宜采用“唇边带着希望 / 每当话语脱口而出”一类中文搭配，不要照搬成“携带希望 / 放出话语”。`;
+严格规则：歌曲需要翻译已由上游独立确定，本角色只翻译，不重新判断语言或是否需要翻译。只处理 units；context、title、artist 仅供理解。referenceTranslations 可能有误，原文始终优先。返回且仅返回 JSON 对象 {"translations":[{"unitId":0,"text":"译文"}]}，与 units 等长，每个 unitId 恰好出现一次。不得返回songLanguage、unitLanguages、segments或notNeeded。不得输出时间戳、Markdown、署名、解释或多余段落，不修改原文或时间。名字、口号与拟声可按目标语言语境保留，但不能把整份外语正文原样返回。`;
 }
 
 export function buildTranslationPrompt(
@@ -131,11 +117,14 @@ function parseJsonResponse(aiResponse) {
   }
 }
 
-export function parseTranslationResponse(aiResponse, expectedUnits, { targetLanguage = 'zh' } = {}) {
+export function parseTranslationResponse(aiResponse, expectedUnits, { targetLanguage = 'zh', allowUnchanged = false, allowEmptyUnitIds = new Set() } = {}) {
   if (!Array.isArray(expectedUnits) || expectedUnits.length === 0) throw new Error('NO_TRANSLATABLE_LINES');
   let parsedJson = parseJsonResponse(aiResponse);
   if (Array.isArray(parsedJson)) parsedJson = { translations: parsedJson };
-  if (parsedJson?.notNeeded === true && Object.keys(parsedJson).length === 1) return null;
+  if (parsedJson?.notNeeded === true && Object.keys(parsedJson).length === 1) {
+    if (targetScriptEvidence(expectedUnits.map(unit => unit.text).join('\n'), targetLanguage) === 'mismatch') throw new Error('INVALID_NOT_NEEDED');
+    return null;
+  }
   if (Object.keys(parsedJson || {}).some((key) => key !== 'translations')) {
     throw new Error('INVALID_RESPONSE_FIELDS');
   }
@@ -159,42 +148,41 @@ export function parseTranslationResponse(aiResponse, expectedUnits, { targetLang
     const text = item.text.trim();
     const sourceText = expectedById.get(item.unitId).text;
     const maximumLength = Math.max(240, sourceText.length * 8);
-    if (!text || text.length > maximumLength || /[\r\n]/u.test(text)
+    if ((!text && !allowEmptyUnitIds.has(item.unitId)) || text.length > maximumLength || /[\r\n]/u.test(text)
       || LRC_TIMESTAMP_ANY_PATTERN.test(text) || /```/.test(text)) {
       throw new Error('INVALID_TRANSLATION_TEXT');
     }
     translatedById.set(item.unitId, text);
   }
 
-  const hasMeaningfulSource = expectedUnits.some(({ text }) => MEANINGFUL_FOREIGN_PATTERN.test(text));
-  if (targetLanguage === 'zh' && hasMeaningfulSource && !HAN_ANY_PATTERN.test([...translatedById.values()].join(''))) {
-    throw new Error('TARGET_LANGUAGE_MISMATCH');
-  }
+  const ordered = expectedUnits.map(unit => translatedById.get(unit.unitId));
+  const translatedBody = ordered.filter(Boolean).join('\n');
+  if (translatedBody && targetScriptEvidence(translatedBody, targetLanguage) === 'mismatch') throw new Error('TARGET_LANGUAGE_MISMATCH');
+  if (!allowUnchanged && isUnchangedTranslation(expectedUnits.map(unit => unit.text), ordered)) throw new Error('UNCHANGED_TRANSLATION');
   return [...translatedById].map(([unitId, text]) => ({ unitId, text }));
 }
 
 export function parseLanguageAwareTranslationResponse(aiResponse, expectedUnits, options = {}) {
   const parsed = parseJsonResponse(aiResponse);
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return { translations: parseTranslationResponse(parsed, expectedUnits, options), language: null,
-      discardLineIndices: [] };
-  }
-  const { songLanguage, discardLineIndices, ...translationResponse } = parsed;
-  const language = isValidSongLanguage(songLanguage) && songLanguage !== 'instrumental'
-    && songLanguage !== 'other' ? songLanguage : null;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)
+    || Object.keys(parsed).some(key => !['translations', 'discardLineIndices'].includes(key))) throw new Error('INVALID_RESPONSE_FIELDS');
+  const { discardLineIndices, ...translationResponse } = parsed;
   const allowed = options.allowedCleanupIndices;
-  const validCandidates = Array.isArray(discardLineIndices) && allowed
-    && discardLineIndices.every((index) => Number.isInteger(index) && allowed.has(index));
-  return {
-    translations: parseTranslationResponse(translationResponse, expectedUnits, options),
-    language,
-    discardLineIndices: validCandidates ? [...new Set(discardLineIndices)].sort((a, b) => a - b) : [],
-  };
+  if (discardLineIndices !== undefined && (!allowed || !Array.isArray(discardLineIndices)
+    || discardLineIndices.some(index => !Number.isInteger(index) || !allowed.has(index)))) throw new Error('INVALID_CLEANUP_INDICES');
+  const discard = [...new Set(discardLineIndices || [])].sort((a, b) => a - b);
+  if (options.analysisOnly) {
+    if (Object.keys(translationResponse).length) throw new Error('INVALID_RESPONSE_FIELDS');
+    return { translations: null, discardLineIndices: discard };
+  }
+  if (!Object.hasOwn(translationResponse, 'translations')) throw new Error('INVALID_COVERAGE');
+  return { translations: parseTranslationResponse(translationResponse, expectedUnits, options), discardLineIndices: discard };
 }
 
 export function reconstructTranslatedLrc(aiResponse, parsedLines) {
   if (!Array.isArray(parsedLines) || parsedLines.length === 0) throw new Error('NO_TRANSLATABLE_LINES');
-  const translations = parseTranslationResponse(aiResponse, parsedLines);
+  // This exported legacy LRC cache helper historically carries Chinese layers.
+  const translations = parseTranslationResponse(aiResponse, parsedLines, { targetLanguage: 'zh', allowUnchanged: true });
   const translatedById = new Map(translations.map(({ unitId, text }) => [unitId, text]));
   const translatedLines = [];
   for (const unit of parsedLines) {
