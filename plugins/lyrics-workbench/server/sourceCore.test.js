@@ -18,8 +18,9 @@ function memory(initial) {
     createIfAbsent: async (_id, value) => { calls.create++; if (current) return { state: 'conflict' }; current = structuredClone(value); revision++; return { ...snapshot(), state: 'created' }; },
   };
 }
-function setup({ initial = null, candidate = document(), config = {}, available = true, failure = null, projectTranslation = artifact => artifact.translation, dependencies = {}, resolveSong = async () => song } = {}) {
-  const store = memory(initial), calls = { fetch: 0, ai: 0, available: 0, read: 0, authority: 0 };
+function setup({ initial = null, candidate = document(), config = {}, available = true, failure = null, projectTranslation = artifact => artifact.translation, dependencies = {}, resolveSong = async () => song,
+  prepareLanguage, translationNeed = () => ({ state: 'needed' }), beginCompletion, executionContext } = {}) {
+  const store = memory(initial), calls = { fetch: 0, ai: 0, language: 0, available: 0, read: 0, authority: 0 };
   const settings = { onlineEnabled: true, lyricPreference: 'word', targetLanguage: 'zh', completionEnabled: true, automaticCompletionEnabled: true, ...config };
   const begin = async ({ song: target, deps }) => {
     calls.ai++; const read = await store.get(target.id);
@@ -27,19 +28,43 @@ function setup({ initial = null, candidate = document(), config = {}, available 
     deps?.checkCurrent?.(read);
     return store.putIfMatch(target.id, { ...read.artifact, aiCompletion: { status: 'pending', updatedAt: new Date().toISOString() } }, read.etag);
   };
-  const source = createWorkbenchSourceCore({ env: {}, db: {}, session: { account: { accountId: 'member' } }, store, dependencies,
+  const complete = async input => {
+    const current = input.deps?.initialRead;
+    const decision = current?.artifact?.translationDecision;
+    if (!decision || decision.policyVersion !== 2 || decision.textHash !== current.artifact.textHash
+      || decision.targetLanguage !== settings.targetLanguage) {
+      const prepared = await prepare(input);
+      if (prepared.need !== 'needed') return { ...prepared.read, song: prepared.song, task: null };
+      input = { ...input, song: prepared.song, deps: { ...input.deps, initialRead: { ...prepared.read, state: 'found' } } };
+    }
+    return beginCompletion ? beginCompletion(input, { store, calls, begin }) : begin(input);
+  };
+  const prepare = async input => {
+    calls.language++;
+    if (prepareLanguage) return prepareLanguage(input, { store, calls, settings });
+    const read = input.deps.initialRead;
+    const existing = read.artifact.translationDecision;
+    const state = translationNeed(read.artifact.original, input.song, { targetLanguage: settings.targetLanguage }).state;
+    if (existing?.policyVersion === 2 && existing.textHash === read.artifact.textHash
+      && existing.targetLanguage === settings.targetLanguage) return { read, song: input.song, need: state };
+    const updated = await store.putIfMatch(input.song.id, { ...read.artifact,
+      translationDecision: { status: state, policyVersion: 2, textHash: read.artifact.textHash, targetLanguage: settings.targetLanguage },
+      aiCompletion: { status: 'completed', updatedAt: new Date().toISOString() } }, read.etag);
+    return { read: updated, song: input.song, need: state };
+  };
+  const source = createWorkbenchSourceCore({ env: {}, db: {}, session: { account: { accountId: 'member' } }, executionContext, store, dependencies,
     operations: {
       settings: async () => settings, assertCurrent: async () => { calls.authority++; }, createDocument: x => structuredClone(x),
       buildArtifact: async (_song, doc) => ({ artifact: asset(doc) }),
       project: value => ({ translation: projectTranslation(value), translationState: value.aiCompletion?.status === 'pending' ? 'pending' : value.aiCompletion?.status === 'failed' ? 'failed' : 'missing' }),
-      resolveTranslationNeed: () => ({ state: 'needed' }),
+      resolveTranslationNeed: translationNeed,
       hasNoTranslationDecision: (artifact, _song, { targetLanguage }) => artifact.translationDecision?.status === 'not_needed'
         && artifact.translationDecision.textHash === artifact.textHash && artifact.translationDecision.targetLanguage === targetLanguage,
       preferred: (left, right) => ({ none: 0, line: 1, word: 2 }[left.syncMode] > { none: 0, line: 1, word: 2 }[right.syncMode]), reliable: value => !value.providerMeta?.versionMismatch,
       fetchCandidate: async () => { calls.fetch++; if (failure) throw failure; return candidate; },
       aiAvailable: async () => { calls.available++; return available; }, aiConfig: async () => settings,
       translationError: code => ({ code, message: 'Safe translation error' }),
-      resolveSong, beginCompletion: begin,
+      resolveSong, beginCompletion: complete, prepareLanguage: prepare,
       readPlayback: async ({ song: target, deps }) => { calls.read++; let read = await deps.readOrCreateLyricArtifact();
         if (settings.completionEnabled && settings.automaticCompletionEnabled && available && !read.artifact.translation && read.artifact.aiCompletion?.status !== 'pending') read = await begin({ song: target });
         return read;
@@ -57,7 +82,7 @@ test('an offline empty workbench does not claim or search a song', async () => {
 test('a weak workbench result has no storage or AI side effects before adoption', async () => {
   const f = setup({ candidate: document('lrclib', 'line') }); const result = await f.source.resolve(song);
   assert.equal(result.quality, 'weak'); assert.equal(result.translation.supported, true);
-  assert.equal(f.calls.ai, 0); assert.equal(f.store.calls.create, 0); assert.equal(f.store.calls.put, 0);
+  assert.equal(f.calls.ai, 0); assert.equal(f.calls.language, 0); assert.equal(f.store.calls.create, 0); assert.equal(f.store.calls.put, 0);
 });
 
 test('adopting an automatic result saves assessment before starting one selected-body completion', async () => {
@@ -69,10 +94,10 @@ test('adopting an automatic result saves assessment before starting one selected
   assert.equal(f.calls.ai, 1, 'pending work is reused');
 });
 
-test('manual mode advertises translation but waits for the owning-source action', async () => {
+test('the retired manual flag cannot suppress automatic completion when the single switch is enabled', async () => {
   const f = setup({ config: { automaticCompletionEnabled: false } });
   const result = await f.source.resolve(song); assert.equal(result.translation.state, 'idle');
-  const adopted = await result.onAdopt(); assert.equal(f.calls.ai, 0);
+  const adopted = await result.onAdopt(); assert.equal(f.calls.ai, 1);
   const translated = await f.source.translate({ songId: song.id, textHash: adopted.artifact.textHash, sourceRef: adopted.sourceRef });
   assert.equal(f.calls.ai, 1); assert.equal(translated.translation.state, 'pending');
 });
@@ -92,6 +117,7 @@ test('an unassessed YT file is evaluated once without any YT provider call', asy
   const first = await f.source.resolve(song); assert.equal(f.calls.fetch, 1); assert.equal(first.translation.state, 'ready');
   await first.onAdopt(); const next = await f.source.resolve(song);
   assert.equal(next.quality, 'good'); assert.equal(f.calls.fetch, 1); assert.equal(f.calls.ai, 0);
+  assert.equal(f.calls.language, 0, 'a usable provider layer needs neither language assessment nor generation');
   assert.equal(next.provenance.originalSource, 'youtube');
 });
 
@@ -129,7 +155,7 @@ test('provider errors preserve an existing file and do not falsely create a no-l
   assert.equal(f.store.calls.create, 0); assert.equal(f.store.calls.put, 0);
 });
 
-test('a changed assessment key rechecks precision and sources once, AI mode alone does not', async () => {
+test('a changed assessment key rechecks precision and sources once, toggling the AI switch does not', async () => {
   const oldKey = 'a'.repeat(64), newKey = 'b'.repeat(64);
   const initial = asset(document('lrclib', 'line'), { provenance: { managedBy: 'lyrics-workbench', evaluation: 'assessed', quality: 'good', assessmentKey: oldKey } });
   const f = setup({ initial, config: { assessmentKey: oldKey, lyricPreference: 'line', completionEnabled: false } });
@@ -137,7 +163,7 @@ test('a changed assessment key rechecks precision and sources once, AI mode alon
   f.settings.assessmentKey = newKey; f.settings.lyricPreference = 'word';
   const result = await f.source.resolve(song); assert.equal(f.calls.fetch, 1); await result.onAdopt();
   const saved = await f.store.get(song.id); assert.equal(saved.artifact.provenance.assessmentKey, newKey);
-  f.settings.automaticCompletionEnabled = false; await f.source.resolve(song); assert.equal(f.calls.fetch, 1);
+  f.settings.completionEnabled = true; await f.source.resolve(song); assert.equal(f.calls.fetch, 1);
 });
 
 test('same-text candidates can improve timing without dropping the saved translation', async () => {
@@ -180,7 +206,7 @@ for (const completionEnabled of [false, true]) {
     assert.deepEqual(result.translation.lines, []);
     const adopted = await result.onAdopt();
     assert.deepEqual((await f.store.get(song.id)).artifact.translation, initial.translation, 'read/adoption leaves the old layer intact');
-    assert.equal(f.calls.ai, 0);
+    assert.equal(f.calls.ai, completionEnabled ? 1 : 0);
     if (completionEnabled) {
       const started = await f.source.translate({ songId: song.id, textHash: initial.textHash, sourceRef: adopted.sourceRef });
       assert.equal(started.translation.state, 'pending');
@@ -245,3 +271,120 @@ for (const candidate of [null, document()]) {
     assert.equal(f.calls.ai, 0);
   });
 }
+
+test('a mainly Chinese song containing foreign inserts caches no translation without starting generation', async () => {
+  const chineseSong = { ...song, language: 'zh' };
+  const f = setup({ candidate: document('kugou', 'word', '听着歌想念一个人 SHOW HA'),
+    translationNeed: (_original, target) => ({ state: target.language === 'zh' ? 'not_needed' : 'needed' }) });
+  const selected = await f.source.resolve(chineseSong);
+  assert.equal(selected.translation.state, 'not_needed');
+  assert.equal(f.calls.language, 0, 'a losing candidate is not assessed');
+  const adopted = await selected.onAdopt();
+  assert.equal(adopted.translation.state, 'not_needed'); assert.equal(adopted.translation.supported, false);
+  assert.equal(f.calls.ai, 0); assert.equal(f.calls.available, 0);
+  assert.equal((await f.store.get(song.id)).artifact.translationDecision.status, 'not_needed');
+  await (await f.source.resolve(chineseSong)).onAdopt();
+  assert.equal(f.calls.language, 1, 'the selected-body assessment is cached');
+});
+
+test('selected unknown lyrics await only language preparation before returning a pending translation', async () => {
+  let release, entered;
+  const gate = new Promise(resolve => { release = resolve; });
+  const started = new Promise(resolve => { entered = resolve; });
+  const unknownSong = { ...song, language: 'other' };
+  const f = setup({ prepareLanguage: async (input, { store }) => {
+    entered(); await gate;
+    const read = input.deps.initialRead;
+    const written = await store.putIfMatch(song.id, { ...read.artifact,
+      translationDecision: { status: 'needed', policyVersion: 2, textHash: read.artifact.textHash, targetLanguage: 'zh' },
+      aiCompletion: { status: 'completed', updatedAt: new Date().toISOString() } }, read.etag);
+    return { read: written, song: { ...input.song, language: 'ja' }, need: 'needed' };
+  } });
+  const selected = await f.source.resolve(unknownSong);
+  let returned = false;
+  const adoption = selected.onAdopt().then(value => { returned = true; return value; });
+  await started; assert.equal(returned, false); assert.equal(f.calls.ai, 0);
+  release();
+  const adopted = await adoption;
+  assert.equal(adopted.translation.state, 'pending'); assert.equal(adopted.document.lines[0].text, 'Hello world');
+  assert.equal(f.calls.ai, 1);
+  await f.source.translate({ songId: song.id, textHash: adopted.artifact.textHash, sourceRef: adopted.sourceRef }, { song: unknownSong });
+  assert.equal(f.calls.language, 1); assert.equal(f.calls.ai, 1, 'client request joins the pending generation');
+});
+
+test('the returned pending task is attached to the execution context without awaiting full generation', async () => {
+  let finish;
+  const task = new Promise(resolve => { finish = resolve; });
+  const tasks = [];
+  const f = setup({ executionContext: { waitUntil(value) { tasks.push(value); } },
+    beginCompletion: async (input, { begin }) => ({ ...await begin(input), task }) });
+  const adopted = await (await f.source.resolve(song)).onAdopt();
+  assert.equal(adopted.translation.state, 'pending'); assert.deepEqual(tasks, [task]);
+  finish(); await task;
+});
+
+test('a language assessment failure preserves original lyrics and retries only on the translation action', async () => {
+  const f = setup({ prepareLanguage: async (input, { store, calls }) => {
+    const read = input.deps.initialRead;
+    if (calls.language > 1) {
+      const written = await store.putIfMatch(song.id, { ...read.artifact,
+        translationDecision: { status: 'needed', policyVersion: 2, textHash: read.artifact.textHash, targetLanguage: 'zh' },
+        aiCompletion: { status: 'completed', updatedAt: new Date().toISOString() } }, read.etag);
+      return { read: written, song: input.song, need: 'needed' };
+    }
+    const failed = await store.putIfMatch(song.id, { ...read.artifact,
+      aiCompletion: { status: 'failed', errorCode: 'language_assessment_undetermined', updatedAt: new Date().toISOString() } }, read.etag);
+    return { read: failed, song: input.song, need: 'unknown' };
+  } });
+  const adopted = await (await f.source.resolve(song)).onAdopt();
+  assert.equal(adopted.translation.state, 'failed'); assert.equal(adopted.translation.supported, true);
+  assert.equal(adopted.document.lines[0].text, 'Hello world'); assert.equal(f.calls.ai, 0);
+  assert.equal(adopted.artifact.translationDecision, undefined);
+  await (await f.source.resolve(song)).onAdopt(); assert.equal(f.calls.language, 1);
+  const retried = await f.source.translate({ songId: song.id, textHash: adopted.artifact.textHash, sourceRef: adopted.sourceRef });
+  assert.equal(retried.translation.state, 'pending'); assert.equal(f.calls.language, 2); assert.equal(f.calls.ai, 1);
+  assert.equal(f.calls.fetch, 1, 'retry reuses the adopted original');
+});
+
+test('a new-policy generation failure is not retried on each read but can be retried explicitly', async () => {
+  const initial = asset(document('manual'));
+  initial.translationDecision = { status: 'needed', policyVersion: 2, textHash: initial.textHash, targetLanguage: 'zh' };
+  initial.aiCompletion = { status: 'failed', errorCode: 'invalid_output', updatedAt: new Date().toISOString() };
+  const f = setup({ initial });
+  const adopted = await (await f.source.resolve(song)).onAdopt();
+  assert.equal(adopted.translation.state, 'failed'); assert.equal(f.calls.ai, 0);
+  await (await f.source.resolve(song)).onAdopt(); assert.equal(f.calls.ai, 0);
+  const started = await f.source.translate({ songId: song.id, textHash: initial.textHash });
+  assert.equal(started.translation.state, 'pending'); assert.equal(f.calls.ai, 1);
+});
+
+test('a legacy generation failure can enter the new language flow once', async () => {
+  const initial = asset(document('manual'));
+  initial.aiCompletion = { status: 'failed', errorCode: 'invalid_output', updatedAt: new Date().toISOString() };
+  const f = setup({ initial });
+  const adopted = await (await f.source.resolve(song)).onAdopt();
+  assert.equal(adopted.translation.state, 'pending'); assert.equal(f.calls.language, 1); assert.equal(f.calls.ai, 1);
+  await (await f.source.resolve(song)).onAdopt(); assert.equal(f.calls.language, 1); assert.equal(f.calls.ai, 1);
+});
+
+test('a legacy Chinese failure becomes a cached no-op without spending on generation', async () => {
+  const initial = asset(document('manual', 'word', '听着歌想念一个人 SHOW HA'));
+  initial.aiCompletion = { status: 'failed', errorCode: 'invalid_output', updatedAt: new Date().toISOString() };
+  const f = setup({ initial, translationNeed: () => ({ state: 'not_needed' }) });
+  const adopted = await (await f.source.resolve({ ...song, language: 'zh' })).onAdopt();
+  assert.equal(adopted.translation.state, 'not_needed'); assert.equal(adopted.translation.supported, false);
+  assert.equal(f.calls.ai, 0); assert.equal(f.calls.available, 0);
+  assert.equal(adopted.artifact.aiCompletion.status, 'completed');
+});
+
+test('language preparation cannot start generation over a newly edited original', async () => {
+  const f = setup({ prepareLanguage: async (input, { store }) => {
+    const read = await store.get(song.id);
+    const edited = await store.putIfMatch(song.id, asset(document('manual', 'word', 'New edit')), read.etag);
+    input.deps.checkCurrent(edited);
+    return { read: edited, song: input.song, need: 'needed' };
+  } });
+  const selected = await f.source.resolve(song);
+  await assert.rejects(selected.onAdopt(), { code: 'LYRIC_RESULT_STALE' });
+  assert.equal(f.calls.ai, 0); assert.equal((await f.store.get(song.id)).artifact.original.lines[0].text, 'New edit');
+});

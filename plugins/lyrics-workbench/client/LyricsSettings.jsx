@@ -4,8 +4,9 @@ import LyricSourcesSettings from './LyricSourcesSettings.jsx';
 import { TRANSLATION_TARGETS, translationTargetLabel } from '../shared/translation-languages.js';
 import { workbenchMessage } from '../shared/messages.js';
 
-const legacyDraft = value => ({ onlineEnabled: true, lyricPreference: 'word', ...value });
-const modeOf = value => !value.completionEnabled || value.translateLyrics === false ? 'off' : value.automaticCompletionEnabled ? 'auto' : 'manual';
+const enabledOf = value => value.completionEnabled !== false && value.translateLyrics !== false;
+const legacyDraft = value => ({ onlineEnabled: true, lyricPreference: 'word', ...value,
+  completionEnabled: enabledOf(value), automaticCompletionEnabled: enabledOf(value) });
 export default function LyricsSettings({ host }) {
   const locale = useLocale();
   const tr = key => workbenchMessage(key, locale);
@@ -55,7 +56,7 @@ export default function LyricsSettings({ host }) {
       <dl className="grid gap-3 text-sm sm:grid-cols-2">
         <div><dt className="text-xs text-[var(--muted)]">{tr('onlineEnabled')}</dt><dd>{t(saved.onlineEnabled ? '已启用' : '未启用')}</dd></div>
         <div><dt className="text-xs text-[var(--muted)]">{tr('lyricPreference')}</dt><dd>{tr(saved.lyricPreference === 'line' ? 'preferLine' : 'preferWord')}</dd></div>
-        <div><dt className="text-xs text-[var(--muted)]">{tr('aiCompletion')}</dt><dd>{tr({off:'off',manual:'manual',auto:'automatic'}[modeOf(saved)])}</dd></div>
+        <div><dt className="text-xs text-[var(--muted)]">{tr('aiCompletion')}</dt><dd>{tr(enabledOf(saved) ? 'enabled' : 'off')}</dd></div>
         <div><dt className="text-xs text-[var(--muted)]">{t('目标译文语言')}</dt><dd>{translationTargetLabel(saved.targetLanguage, locale)}</dd></div>
       </dl>
     </SettingsSection>
@@ -63,19 +64,16 @@ export default function LyricsSettings({ host }) {
       <form className="space-y-5" onSubmit={event => void save(event)}>
       <SettingsToggle label={tr('onlineEnabled')} checked={Boolean(draft.onlineEnabled)} disabled={busy}
         onChange={event => patch('onlineEnabled', event.target.checked)} />
+      <SettingsToggle label={tr('aiCompletion')} checked={enabledOf(draft)} disabled={busy}
+        onChange={event => {
+          const enabled = event.target.checked;
+          setDraft(current => ({ ...current, completionEnabled: enabled, automaticCompletionEnabled: enabled,
+            ...(enabled ? { translateLyrics: true } : {}) }));
+        }} />
       <div className="settings-form-grid">
         <label><span className="settings-field-label">{tr('lyricPreference')}</span>
           <SelectControl className="settings-field" aria-label={tr('lyricPreference')} value={draft.lyricPreference} disabled={busy} onChange={event => patch('lyricPreference', event.target.value)}>
             <option value="word">{tr('preferWord')}</option><option value="line">{tr('preferLine')}</option>
-          </SelectControl>
-        </label>
-        <label><span className="settings-field-label">{tr('aiCompletion')}</span>
-          <SelectControl className="settings-field" aria-label={tr('aiCompletion')} value={modeOf(draft)} disabled={busy} onChange={event => {
-            const mode = event.target.value;
-            setDraft(current => ({ ...current, completionEnabled: mode !== 'off', automaticCompletionEnabled: mode === 'auto',
-              ...(mode !== 'off' ? { translateLyrics: true } : {}) }));
-          }}>
-            <option value="off">{tr('off')}</option><option value="manual">{tr('manual')}</option><option value="auto">{tr('automatic')}</option>
           </SelectControl>
         </label>
         <div>

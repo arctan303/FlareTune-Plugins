@@ -1,5 +1,5 @@
 import { translationLanguageMatches } from '../shared/translation-languages.js';
-const DEFAULT_SETTINGS = Object.freeze({ onlineEnabled: true, lyricPreference: 'word', targetLanguage: 'en', completionEnabled: true, automaticCompletionEnabled: true });
+const DEFAULT_SETTINGS = Object.freeze({ onlineEnabled: true, lyricPreference: 'word', targetLanguage: 'en', completionEnabled: true });
 const readyArtifact = read => read?.artifact?.status === 'ready' ? read.artifact : null;
 export const isProtectedWorkbenchArtifact = artifact => artifact?.original?.source === 'manual' || artifact?.provenance?.evaluation === 'manual';
 export function markManuallySelectedArtifact(artifact) {
@@ -37,7 +37,8 @@ export function createWorkbenchSourceCore({ env, db, session, executionContext, 
     const valid = translation && translation.originalTextHash === artifact.textHash
       && spokenLanguageMatches(translation.language || (translation.source === 'ai' ? 'zh' : null), config.targetLanguage);
     const cachedNoOp = operations.hasNoTranslationDecision(artifact, song, { targetLanguage: config.targetLanguage });
-    const needs = !cachedNoOp && operations.resolveTranslationNeed(artifact.original, song, { targetLanguage: config.targetLanguage }).state !== 'not_needed';
+    const needs = !cachedNoOp && operations.resolveTranslationNeed(artifact.original, song,
+      { targetLanguage: config.targetLanguage, artifact }).state !== 'not_needed';
     const available = !valid && config.completionEnabled && needs && await operations.aiAvailable();
     const state = valid ? 'ready' : !needs ? 'not_needed' : projected?.translationState === 'pending' ? 'pending'
       : projected?.translationState === 'failed' ? 'failed' : available ? 'idle' : 'unavailable';
@@ -58,24 +59,50 @@ export function createWorkbenchSourceCore({ env, db, session, executionContext, 
     return read;
   };
   const completeSelected = async (read, song, config, options = {}, automatic = false) => {
-    const result = await toResult(read, song, config);
-    if (!result || ['ready', 'pending', 'not_needed'].includes(result.translation.state) || !result.translation.supported) return result;
-    // Automatic reads retry only an explicitly recoverable exhausted invocation;
-    // other failures remain visible until a user requests another completion.
-    if (automatic && (result.translation.state === 'failed' && read.artifact.aiCompletion?.errorCode !== 'request_budget_exhausted')) return result;
+    let result = await toResult(read, song, config);
+    if (!result || ['ready', 'pending'].includes(result.translation.state) || !config.completionEnabled) return result;
+    const cachedNoOp = operations.hasNoTranslationDecision(read.artifact, song, { targetLanguage: config.targetLanguage });
+    if (result.translation.state === 'not_needed' && cachedNoOp
+      || !result.translation.supported && result.translation.state !== 'not_needed') return result;
+    // An unknown-language failure is not a no-translation decision. Ordinary
+    // reads retain its retryable status; the owning-source POST may retry it.
+    if (automatic && result.translation.state === 'failed'
+      && /^(?:language_assessment_|language_undetermined$)/u.test(read.artifact.aiCompletion?.errorCode || '')) return result;
     const expectedHash = read.artifact.textHash;
+    const aiConfig = await operations.aiConfig(db);
+    const completionDeps = { ...dependencies.aiDeps, session, consumerContext: context,
+      subsonicPrincipal: dependencies.subsonicPrincipal, registry: dependencies.registry,
+      signal: options.signal, lyricConfig: aiConfig,
+      checkCurrent: value => { if (value?.artifact?.textHash !== expectedHash) throw safeFailure('LYRIC_RESULT_STALE'); return value; } };
+    // beginCompletion synchronously assesses an idle song and hands its one
+    // pending claim to generation. A separate prepare here would settle and
+    // immediately recreate that claim. Existing failures/no-ops still need
+    // their decision cache reconciled before considering automatic work.
+    if (operations.prepareLanguage && result.translation.state !== 'idle') {
+      const prepared = await operations.prepareLanguage({ env, db, song, store,
+        actorAccountId: session?.account?.accountId || context?.identity?.accountId,
+        targetLanguage: config.targetLanguage,
+        deps: { ...completionDeps, initialRead: { ...read, state: 'found' } } });
+      read = prepared.read;
+      song = prepared.song || song;
+      if (!readyArtifact(read) || read.artifact.textHash !== expectedHash) throw safeFailure('LYRIC_RESULT_STALE');
+      result = await toResult(read, song, config);
+      if (prepared.need !== 'needed' || !result || ['ready', 'pending', 'not_needed'].includes(result.translation.state)
+        || !result.translation.supported) return result;
+    }
+    // A freshly prepared policy decision clears only obsolete pre-1.0 failures.
+    // New generation failures remain visible until POST, without a read loop.
+    if (automatic && result.translation.state === 'failed'
+      && read.artifact.aiCompletion?.errorCode !== 'request_budget_exhausted') return result;
     const started = await operations.beginCompletion({ env, db, song, store,
       actorAccountId: session?.account?.accountId || context?.identity?.accountId,
       force: false, targetLanguage: config.targetLanguage, automatic,
-      deps: { ...dependencies.aiDeps, session, consumerContext: context,
-        subsonicPrincipal: dependencies.subsonicPrincipal, registry: dependencies.registry,
-        signal: options.signal, lyricConfig: await operations.aiConfig(db), initialRead: { ...read, state: 'found' },
-        checkCurrent: value => { if (value?.artifact?.textHash !== expectedHash) throw safeFailure('LYRIC_RESULT_STALE'); return value; } } });
+      deps: { ...completionDeps, initialRead: { ...read, state: 'found' } } });
     if (started.task) {
       if (executionContext?.waitUntil) executionContext.waitUntil(started.task);
       else void started.task.catch(() => undefined);
     }
-    return toResult(started.artifact ? started : read, song, config);
+    return toResult(started.artifact ? started : read, started.song || song, config);
   };
   const ensureSongAvailable = async song => {
     const exists = typeof dependencies.songStillExists === 'function'
@@ -175,7 +202,7 @@ export function createWorkbenchSourceCore({ env, db, session, executionContext, 
           }
         }
         if (adopted.artifact.textHash !== selectedHash) throw safeFailure('LYRIC_RESULT_STALE');
-        return config.completionEnabled && config.automaticCompletionEnabled
+        return config.completionEnabled
           ? completeSelected(adopted, song, config, options, true)
           : toResult(adopted, song, config);
       } });

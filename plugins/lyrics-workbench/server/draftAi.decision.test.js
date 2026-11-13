@@ -16,7 +16,7 @@ test('a virtual-song AI draft returns the no-op decision in its receipt without 
   const result = await completeLyricDraft({ env, db: { prepare: () => assert.fail('No catalog writes for a virtual draft') }, song,
     lines, translationLanguage: 'zh', actorAccountId: 'owner', etag: 'v1', deps: {
       aiAccess: { db: {}, lease: {}, config, client: { assertCurrent: async () => {}, ask: async () => {
-        calls++; return { songLanguage: 'zh', translations: [{ unitId: 0, text: '清风拂过窗边' }] };
+        calls++; return { language: 'zh', match: 0.95 };
       } } }, reserveDailyQuota: async () => true,
     } });
   assert.equal(result.status, 'ready');
@@ -50,17 +50,13 @@ const scopedBundle = await build({ entryPoints: [fileURLToPath(new URL('./draftA
 const scopedDraft = (await import('data:text/javascript;base64,' + Buffer.from(scopedBundle.outputFiles[0].text).toString('base64'))).completeLyricDraft;
 for (const id of ['library-song', 'yt:abcdefghijk']) {
   for (const inline of [false, true]) {
-    test(`unknown-language draft keeps validated mixed translation without mutating metadata: ${id}/${inline ? 'inline' : 'rows'}`, async () => {
+    test(`unknown-language draft classifies dominant Chinese without translating foreign inserts or mutating metadata: ${id}/${inline ? 'inline' : 'rows'}`, async () => {
       const env = { SETUP_SECRET: 'fixture-secret-for-mixed-draft-at-least-32-characters' };
       const song = { id, language: null, title: 'Fixture', artist: 'Singer' };
       const beforeSong = structuredClone(song);
       const lines = inline ? [{ time: 1, text: '我轻声说 I love you' }]
         : [{ time: 1, text: '风吹过窗前' }, { time: 2, text: 'I will wait for you' }];
-      const response = inline ? { songLanguage: 'zh', unitLanguages: [{ unitId: 0, languages: ['zh', 'en'], segments: [
-        { text: '我轻声说 ', language: 'zh' }, { text: 'I love you', language: 'en', translation: '我爱你' },
-      ] }], translations: [{ unitId: 0, text: '我爱你' }] } : { songLanguage: 'zh',
-        unitLanguages: [{ unitId: 0, language: 'zh' }, { unitId: 1, language: 'en' }],
-        translations: [{ unitId: 0, text: '' }, { unitId: 1, text: '我会等你' }] };
+      const response = { language: 'zh', match: 0.9 };
       const db = { prepare: () => assert.fail('Draft processing must not read or write shared catalog metadata') };
       let calls = 0;
       const config = { provider: 'openai', model: 'fixture', targetLanguage: 'zh', completionEnabled: true,
@@ -69,16 +65,16 @@ for (const id of ['library-song', 'yt:abcdefghijk']) {
         deps: { aiAccess: { db, lease: {}, config, client: { assertCurrent: async () => {}, ask: async () => { calls++; return response; } } },
           reserveDailyQuota: async () => true } });
       assert.equal(result.status, 'ready');
-      assert.deepEqual(result.lines.map(line => line.tlyric || ''), inline ? ['我爱你'] : ['', '我会等你']);
+      assert.deepEqual(result.lines.map(line => line.tlyric || ''), inline ? [''] : ['', '']);
       assert.deepEqual(result.lines.map(({ tlyric, ...line }) => line), lines);
       assert.deepEqual(song, beforeSong);
       assert.equal(result.inferredLanguage, 'zh');
-      assert.equal(result.translationLanguage, 'zh');
+      assert.equal(result.translationLanguage, null);
       const textHash = (await import('node:crypto')).createHash('sha256').update(lines.map(line => line.text).join('\n')).digest('hex');
       const receipt = await verifyLyricDraftReceiptData(env, result.receipt,
         { songId: id, accountId: 'owner', etag: 'v1', textHash });
-      assert.equal(receipt.decision.status, 'translated');
-      assert.equal(receipt.decision.hasForeignPassages, true);
+      assert.equal(receipt.decision.status, 'not_needed');
+      assert.equal(receipt.decision.hasForeignPassages, undefined);
       assert.equal(calls, 1);
     });
   }

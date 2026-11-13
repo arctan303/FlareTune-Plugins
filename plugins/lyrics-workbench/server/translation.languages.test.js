@@ -24,35 +24,24 @@ test('Traditional Chinese does not silently accept clearly Simplified-only wordi
   assert.throws(()=>parseTranslationResponse(translated('我們愛這個世界'),units,{targetLanguage:'zh'}),/TARGET_LANGUAGE_MISMATCH/u);
   assert.equal(targetScriptEvidence('你好','zh-Hant'),'unknown');
 });
-test('Latin text remains unknown instead of being guessed as English',()=>{
+test('Latin script compatibility does not guess the underlying language',()=>{
   assert.equal(targetScriptEvidence('Hola mundo','en'),'unknown');
-  assert.throws(()=>parseLanguageAwareTranslationResponse({notNeeded:true},[{unitId:0,text:'Hola mundo'}],{targetLanguage:'en'}),/LANGUAGE_UNDETERMINED/u);
 });
-test('a response declaration contradicting the requested Latin language is rejected',()=>{
-  assert.throws(()=>parseLanguageAwareTranslationResponse({...translated('Hola mundo'),translationLanguage:'es'},units,{targetLanguage:'en'}),/TARGET_LANGUAGE_MISMATCH/u);
+test('translation role rejects source-language and target-language declarations',()=>{
+  for(const field of [{songLanguage:'en'},{translationLanguage:'es'},{unitLanguages:[]},{notNeeded:true}]){
+    assert.throws(()=>parseLanguageAwareTranslationResponse({...translated('Un bello mundo'),...field},units,{targetLanguage:'es'}),/INVALID_RESPONSE_FIELDS/u);
+  }
 });
-test('actual Japanese units cannot be skipped as already English based on a claimed metadata language',()=>{
-  assert.throws(()=>parseLanguageAwareTranslationResponse({notNeeded:true,songLanguage:'en'},[{unitId:0,text:'君が好きだよ'}],{targetLanguage:'en'}),/INVALID_NOT_NEEDED|SOURCE_LANGUAGE_MISMATCH/u);
-});
-test('unchanged whole-body output is not a translation, while an explicitly completed mixed batch can retain target-language lines',()=>{
+test('unchanged whole-body output cannot be saved as a translation',()=>{
   assert.throws(()=>parseTranslationResponse(translated('Hello world'),units,{targetLanguage:'en'}),/UNCHANGED_TRANSLATION/u);
-  assert.equal(parseTranslationResponse(translated('Hello world'),units,{targetLanguage:'en',allowUnchanged:true})[0].text,'Hello world');
 });
-test('a Traditional target declaration does not become a catalog song-language value',()=>{
-  const result=parseLanguageAwareTranslationResponse({...translated('愛與夢想'),songLanguage:'zh-Hant',translationLanguage:'zh-Hant'},units,{targetLanguage:'zh-Hant',sourceLanguage:'en'});
-  assert.equal(result.language,null); assert.equal(result.translations.length,1);
-});
-test('all target prompts carry the same fidelity rules with their own requested language',()=>{
+test('all target prompts carry fidelity rules and delegate only translation',()=>{
   for(const target of TRANSLATION_TARGETS){
     const prompt=buildTranslationPrompt(units,'Context title','Context artist',{targetLanguage:target});
-    assert.ok(prompt[0].content.includes(`（${target}）`));
-    assert.ok(prompt[0].content.includes('信、达、雅')); assert.deepEqual(JSON.parse(prompt[1].content).units,[{unitId:0,text:'Hello world'}]);
+    assert.ok(prompt[0].content.includes('（'+target+'）'));
+    assert.ok(prompt[0].content.includes('信、达、雅'));
+    assert.ok(prompt[0].content.includes('不重新判断语言或是否需要翻译'));
+    assert.deepEqual(JSON.parse(prompt[1].content).units,[{unitId:0,text:'Hello world'}]);
   }
-  assert.equal(getTranslationPromptVersion(),'lyrics-target-v8-vocalization');
-});
-
-test('same-request AI language evidence turns an already-target copy into no translation, not a fake layer',()=>{
-  const result=parseLanguageAwareTranslationResponse({...translated('Hello world'),songLanguage:'en'},units,{targetLanguage:'en'});
-  assert.equal(result.translations,null); assert.equal(result.language,'en');
-  assert.throws(()=>parseLanguageAwareTranslationResponse(translated('Hello world'),units,{targetLanguage:'en'}),/UNCHANGED_TRANSLATION|LANGUAGE_UNDETERMINED/u);
+  assert.equal(getTranslationPromptVersion(),'lyrics-1.0.0-translation');
 });

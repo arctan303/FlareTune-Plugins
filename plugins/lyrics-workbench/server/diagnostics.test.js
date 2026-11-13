@@ -39,8 +39,8 @@ async function runFixture({ texts = ['The morning comes again'], ask, settings =
   return { result, artifact, original, calls };
 }
 
-function assertArtifactFailure(f, errorCode = 'invalid_output') {
-  assert.equal(f.result.state, 'updated');
+function assertArtifactFailure(f, errorCode = 'invalid_output', state = 'updated') {
+  assert.equal(f.result.state, state);
   assert.equal(f.artifact.aiCompletion.status, 'failed');
   assert.equal(f.artifact.aiCompletion.errorCode, errorCode);
   assert.deepEqual(Object.keys(f.artifact.aiCompletion).sort(), ['errorCode', 'status', 'updatedAt']);
@@ -48,37 +48,46 @@ function assertArtifactFailure(f, errorCode = 'invalid_output') {
   assert.equal(f.artifact.translation, null);
   assert.equal(f.artifact.diagnostic, undefined);
   assert.equal(f.artifact.validationCode, undefined);
-  assert.equal(f.artifact.translationDecision, undefined);
+  if (f.artifact.translationDecision) {
+    assert.equal(f.artifact.translationDecision.status, 'needed');
+    assert.equal(f.artifact.translationDecision.textHash, f.artifact.textHash);
+    assert.equal(JSON.stringify(f.artifact.translationDecision).includes(secret), false);
+  }
 }
 
-test('local response validation returns a bounded diagnostic without changing the failed artifact', async () => {
-  const f = await runFixture({ ask: async () => ({ songLanguage: 'en',
+test('local response validation returns a bounded diagnostic without persisting private error details', async () => {
+  const f = await runFixture({ ask: async () => ({
     translations: [{ unitId: 99, text: secret }] }) });
   assertArtifactFailure(f);
+  assert.equal(f.artifact.translationDecision.status, 'needed');
   assert.deepEqual(f.result.diagnostic, { validationCode: 'INVALID_TRANSLATION_INDEX', stage: 'validation', batchIndex: 0 });
   assert.equal(JSON.stringify(f.result.diagnostic).includes(secret), false);
 });
 
 test('validation reports the actual later batch rather than the first successful batch', async () => {
-  const f = await runFixture({ texts: Array.from({ length: 21 }, (_, i) => `We sing verse ${i}`), ask: async messages => {
+  const f = await runFixture({ texts: Array.from({ length: 41 }, (_, i) => `We sing verse ${i}`), ask: async messages => {
     const { units } = JSON.parse(messages.at(-1).content);
-    return { songLanguage: 'en', translations: units.map(unit => ({ unitId: unit.unitId === 20 ? 999 : unit.unitId, text: '我们一起歌唱' })) };
+    return { translations: units.map(unit => ({ unitId: unit.unitId === 40 ? 999 : unit.unitId, text: '我们一起歌唱' })) };
   } });
   assertArtifactFailure(f);
   assert.equal(f.calls, 2);
   assert.deepEqual(f.result.diagnostic, { validationCode: 'INVALID_TRANSLATION_INDEX', stage: 'validation', batchIndex: 1 });
 });
 
-test('setup validation is identified without inventing a batch', async () => {
+test('an empty sung body settles without generation or an invented validation failure', async () => {
   const f = await runFixture({ texts: ['♪'], ask: () => assert.fail('No generation for empty completion units') });
-  assertArtifactFailure(f);
-  assert.deepEqual(f.result.diagnostic, { validationCode: 'NO_TRANSLATABLE_LINES', stage: 'setup' });
+  assert.equal(f.result.state, 'updated');
+  assert.equal(f.artifact.aiCompletion.status, 'completed');
+  assert.equal(f.artifact.translationDecision.status, 'not_needed');
+  assert.equal(f.result.diagnostic, undefined);
+  assert.equal(f.calls, 0); assert.equal(f.artifact.translation, null);
+  assert.deepEqual(f.artifact.original, f.original);
 });
 
-test('batch construction validation reports setup and preserves its public error code', async () => {
+test('an invalid target in language preparation reports a safe setup diagnostic without invoking the model', async () => {
   const f = await runFixture({ settings: { ...config, targetLanguage: 'unknown-target' },
     ask: () => assert.fail('No generation for invalid target') });
-  assertArtifactFailure(f);
+  assertArtifactFailure(f, 'language_assessment_failed', 'found');
   assert.deepEqual(f.result.diagnostic, { validationCode: 'INVALID_TARGET_LANGUAGE', stage: 'setup' });
 });
 
@@ -86,7 +95,7 @@ const finalizationRuntime = await bundleWithCapabilities('./translation.js', com
   .replace('export const projectLyricArtifact =', 'const baseProjectLyricArtifact =')
   + '\nexport const projectLyricArtifact = () => ({translation:null,translationAvailable:false});');
 test('the final storage-boundary validation has a distinct safe stage', async () => {
-  const f = await runFixture({ module: finalizationRuntime, ask: async () => ({ songLanguage: 'en',
+  const f = await runFixture({ module: finalizationRuntime, ask: async () => ({
     translations: [{ unitId: 0, text: '清晨再次来临' }] }) });
   assertArtifactFailure(f);
   assert.deepEqual(f.result.diagnostic, { validationCode: 'INVALID_TRANSLATION_OUTPUT', stage: 'finalization' });
@@ -112,7 +121,7 @@ test('an upstream failure after the JSON retry cannot inherit the previous valid
 test('draft failures carry only the bounded diagnostic and the established error code', async () => {
   const result = await completeLyricDraft({ env: {}, db: {}, song, lines: [{ time: 1, text: 'The morning comes again' }],
     etag: 'v1', translationLanguage: 'zh', actorAccountId: 'owner', deps: { reserveDailyQuota: async () => true,
-      aiAccess: { db: {}, lease: {}, config, client: { assertCurrent: async () => {}, ask: async () => ({ songLanguage: 'en',
+      aiAccess: { db: {}, lease: {}, config, client: { assertCurrent: async () => {}, ask: async () => ({
         translations: [{ unitId: 99, text: secret }] }) } } } });
   assert.deepEqual(result, { status: 'failed', errorCode: 'invalid_output',
     diagnostic: { validationCode: 'INVALID_TRANSLATION_INDEX', stage: 'validation', batchIndex: 0 } });
@@ -120,7 +129,7 @@ test('draft failures carry only the bounded diagnostic and the established error
 });
 
 const workspaceCapabilities = completionCapabilities + String.raw`
-export const LYRIC_TRANSLATION_POLICY_VERSION = 1;
+export const LYRIC_TRANSLATION_POLICY_VERSION = 2;
 export class LyricSourceError extends Error {}
 export class LyricArtifactStoreError extends Error {}
 export class LyricCandidateInspectionError extends Error {}
@@ -162,7 +171,7 @@ async function workspaceFailure({ result, role = 'admin', actualDraft = false } 
       context: { requireRoles: async () => {} }, aiAvailable: async () => true,
       ...(actualDraft ? {} : { completeDraft: async () => { draftCalls++; return result; } }),
       aiDeps: { loadLyricAiConfig: async () => config, reserveDailyQuota: async () => true,
-        aiAccess: { db: {}, lease: {}, config, client: { assertCurrent: async () => {}, ask: async () => ({ songLanguage: 'en',
+        aiAccess: { db: {}, lease: {}, config, client: { assertCurrent: async () => {}, ask: async () => ({
           translations: [{ unitId: 99, text: secret }] }) } } } });
   return { response, payload: await response.json(), draftCalls, writes };
 }

@@ -23,7 +23,7 @@ import {
   buildLyricTranslationDecision,
   LYRIC_TRANSLATION_POLICY_VERSION,
 } from "@flaretune/plugin-sdk/server/lyric-workflow";
-import { beginLyricAssetAiCompletion, resolveLegacyLyricCleanup, safeLyricValidationDiagnostic } from "./translation.js";
+import { beginLyricAssetAiCompletion, safeLyricValidationDiagnostic } from "./translation.js";
 import { completeLyricDraft } from "./draftAi.js";
 import { verifyLyricDraftReceiptData } from "./draftReceipt.js";
 import { loadLyricAiConfig, loadLyricAiProcessingSettings } from "./config.js";
@@ -94,6 +94,12 @@ const validEtag = (value) => value === null
     && !/[\u0000-\u001f\u007f]/u.test(value));
 
 const validTranslationLanguage = value => value === undefined || isTranslationTarget(value);
+
+function withCleanupConsent(deps, cleanDirtyLyrics = false) {
+  return { ...deps, lyricConfig: { ...deps.lyricConfig, cleanDirtyLyrics },
+    ...(deps.aiAccess ? { aiAccess: { ...deps.aiAccess,
+      config: { ...deps.aiAccess.config, cleanDirtyLyrics } } } : {}) };
+}
 
 function currentData(read, song, now, targetLanguage = null, viewerAccountId = null) {
   if (read.state === 'missing' || read.state === 'legacy' || read.artifact?.status === 'reset') {
@@ -299,11 +305,11 @@ export async function handleLyricsWorkbenchRoute(request, url, db, headers = {},
       }
     }
     const completionEnabled = settings.completionEnabled && gatewayAvailable;
-    const aiDeps = { ...deps.aiDeps, lyricConfig: settings, ...(aiLease ? { aiLease } : {}) };
+    let aiDeps = withCleanupConsent({ ...deps.aiDeps, lyricConfig: settings, ...(aiLease ? { aiLease } : {}) });
     if (aiLease && ['ai-completion', 'draft-ai'].includes(action)) {
       const access = await createLyricsAiAccess({ env, db, session, context: deps.context,
         signal: request.signal, deps: aiDeps });
-      aiDeps.aiAccess = access;
+      aiDeps = withCleanupConsent({ ...aiDeps, aiAccess: access });
       deps.useAiLease?.(access.client);
       // This service lease preserves the operation's admin/member scope and
       // adds Gateway authority, so the shared I/O needs one combined gate.
@@ -319,7 +325,7 @@ export async function handleLyricsWorkbenchRoute(request, url, db, headers = {},
       if ([...url.searchParams.keys()].length) return failure(400, 'INVALID_QUERY', 'Unexpected query', headers);
       const read = notDeleting(await store.get(songId));
       return success({ song, aiCompletionEnabled: completionEnabled,
-        ...dataOf(await resolveLegacyLyricCleanup(store, song, read, now)) }, 200, headers);
+        ...dataOf(read) }, 200, headers);
     }
     if (!completionEnabled && ['ai-completion', 'draft-ai'].includes(action)) {
       if (settings.completionEnabled && !gatewayAvailable) return failure(409, 'PLUGIN_DEPENDENCY_UNAVAILABLE', 'Lyric AI gateway is unavailable', headers);
@@ -498,9 +504,10 @@ export async function handleLyricsWorkbenchRoute(request, url, db, headers = {},
       return success({ ...dataOf({ ...written, state: 'found' }), languageUpdateFailed }, 200, headers);
     }
     if (action === 'draft-ai') {
-      const body = await bodyOf(request, ['lines', 'etag', 'translationLanguage'], ['lines', 'etag'], 2 * 1024 * 1024);
+      const body = await bodyOf(request, ['lines', 'etag', 'translationLanguage', 'cleanDirtyLyrics'], ['lines', 'etag'], 2 * 1024 * 1024);
       if (!body || !validEtag(body.etag) || !validEditorLines(body.lines)
-        || !validTranslationLanguage(body.translationLanguage)) {
+        || !validTranslationLanguage(body.translationLanguage)
+        || body.cleanDirtyLyrics !== undefined && typeof body.cleanDirtyLyrics !== 'boolean') {
         return failure(400, 'INVALID_LYRIC_DRAFT', 'Invalid lyric draft', headers);
       }
       const current = notDeleting(await store.get(songId));
@@ -513,7 +520,7 @@ export async function handleLyricsWorkbenchRoute(request, url, db, headers = {},
           env, db, song, lines: body.lines, etag: body.etag,
           translationLanguage: body.translationLanguage || storedLyricTranslationLanguage(current.artifact?.translation) || targetLanguage,
           actorAccountId: session.account.accountId,
-          deps: aiDeps,
+          deps: withCleanupConsent(aiDeps, body.cleanDirtyLyrics === true),
         });
       } catch (error) {
         return knownFailure(error, headers)

@@ -20,6 +20,16 @@
 - `main` 的当前源码组合为 Gateway 0.2.1、Assistant 0.2.0、Lyrics Workbench 0.2.1、Roam 0.1.1、Xiaomi Speaker 1.1.1、YouTube Music 0.2.4；YT 0.2.4 最低宿主 API 4，旧版 API 2／3 条目继续保留，不强制升级现有站点。
 - YT 0.2.4 已包含增强来源链、原生译文和搜索原名展示，要求 API 4 宿主。工作台 0.3.x 仍按开发目录发布；历史增强 API 3 包依赖额外的歌词接口，不能仅凭相同 API 数字认定兼容。
 
+### 歌词工作台 1.0.0 / Lyrics workspace 1.0.0
+
+**候选／发布准备中，尚未正式发布。** 首个正式版候选将歌词 AI 收敛为一个启用开关和一次模型配置：同一模型分别承担缺标歌曲的主要语言打标与歌词翻译。已有合格的目标语言来源译文直接复用；主要语言与目标一致时，不为少量外语插句额外翻译，例如中文为主的歌不另译成中文。需要翻译时先返回正文，再异步生成，后续请求复用同一任务；失败保留正文并可重试，客户端不新增语言判断。
+
+**最低宿主能力兼容编号为 5。** 新的“需要翻译、尚未生成”判断缓存增加了旧宿主无法读取的状态，能力 4 宿主不能直接安装此包。该编号与插件版本 1.0.0、FlareTune 软件版本分别管理；发布插件不代表发布宿主 1.3.0，也不会自动更新任何站点。旧“仅手动”且 AI 已开启的配置升级后改为自动按需准备；明确关闭或旧翻译开关关闭的配置继续关闭。升级前请检查歌词 AI 开关。完整变更、保全及恢复说明见[中英发布说明](release-notes/lyrics-workbench-1.0.0.md)。
+
+**Release candidate; not yet formally released.** One AI switch and one model configuration serve two roles: predominant-language tagging for untagged songs, then translation when needed. Usable provider translations are reused without AI. A few foreign phrases do not trigger translation when the predominant language already matches the target, such as a mainly Chinese song with Chinese as the target. Original lyrics return before background translation completes; later requests reuse the same task, and failures keep the original available for retry. Consumer clients keep their existing API behavior.
+
+**Host capability level 5 is required.** The new cached “translation needed” state cannot be read by level-4 hosts. This requirement is independent of plugin version 1.0.0 and the FlareTune application version. Enabled legacy manual-only AI becomes automatic preparation on demand; explicitly disabled AI or legacy translation remains disabled. Review the switch before upgrading. This plugin release does not publish FlareTune 1.3.0 or upgrade site hosts. See the [bilingual release notes](release-notes/lyrics-workbench-1.0.0.md) for configuration preservation and recovery.
+
 ### YouTube Music 0.2.4
 
 搜索页按同一个视频 ID 补充发布者原名。`displayTitle` 只用于呈现，原 `title`、结果顺序、歌曲身份、播放和歌词输入保持；无需改变资料语言或识别歌曲语言。公开元数据请求有缓存、并发和总期限限制，失败保留现有名称；发布者原题自带的双语、feat 或版本词原样显示。宿主 API 4 提供对应展示读取，旧宿主继续使用目录里的兼容旧版本。

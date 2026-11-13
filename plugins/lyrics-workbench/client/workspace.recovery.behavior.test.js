@@ -10,7 +10,7 @@ function fixture(value) {
   const host={isCurrent:()=>true,notify(){},session:{get:()=>({authenticated:true,user:{role:'admin'}})},beforeLeave:{register:()=>()=>{}}};
   const view=createBackgroundModuleHarness({file:new URL('./LyricsPluginPage.jsx',import.meta.url),
     render:(module,props)=>{const element=module.default(props);return element.type(element.props);},modules:{
-      '@flaretune/plugin-sdk':{t:key=>key,useSettingsReadOnly:()=>false,SettingsInput:'input',ProgressBar:'progress',PageBackButton:'back'},
+      '@flaretune/plugin-sdk':{t:key=>key,useLocale:()=> 'zh',useSettingsReadOnly:()=>false,SettingsInput:'input',SettingsToggle:'toggle',ProgressBar:'progress',PageBackButton:'back'},
       'lucide-react':{},'./workspace.css':{},'./LyricsSettings.jsx':'settings','./LyricsCandidatePanel.jsx':'candidates',
       './useHostPlayer.js':{useHostPlayer:()=>player},'./api.js':{createLyricsWorkspaceApi:()=>({})},
       './useManagedLyricsAsset.js':{useManagedLyricsAsset:()=>({...managed,load(){loads++;}})}},
