@@ -266,7 +266,8 @@ export function parseLanguageAwareTranslationResponse(aiResponse, expectedUnits,
       sourceLanguage: effectiveLanguage, hasForeignPassages: false,
       discardLineIndices: validCandidates ? [...new Set(discardLineIndices)].sort((a, b) => a - b) : [] };
   }
-  const sameTargetIds = new Set(unitDecisions ? [...unitDecisions].filter(([, item]) => item.state === 'not_needed').map(([unitId]) => unitId) : []);
+  const sameTargetIds = new Set(notNeeded ? expectedUnits.map(unit => unit.unitId)
+    : unitDecisions ? [...unitDecisions].filter(([, item]) => item.state === 'not_needed').map(([unitId]) => unitId) : []);
   const normalizedResponse = vocalizationIds.size && Array.isArray(translationResponse.translations)
     ? { ...translationResponse, translations: translationResponse.translations.map(item =>
       vocalizationIds.has(item?.unitId) && typeof item.text === 'string' ? { ...item, text: '' } : item) }

@@ -73,3 +73,14 @@ test('laughter beside an isolated borrowed word is assessed after retaining that
     translations: [{ unitId: 41, text: '' }] }, source, options);
   assert.equal(result.translations, null); assert.equal(source[0].text, '我在台上 SHOW HA 给你看');
 });
+
+test('an already-target batch accepts fully covered empty translations without redundant unit languages', () => {
+  const units = [{ unitId: 43, text: '我在窗前等你回来' }, { unitId: 45, text: '给你一场 SHOW' }];
+  const result = parse({ songLanguage: 'zh', translations: units.map(unit => ({ unitId: unit.unitId, text: '' })) }, units, options);
+  assert.equal(result.translations, null); assert.equal(result.hasForeignPassages, false);
+});
+
+test('same-target batch inference still rejects empty foreign or contradictory content', () => {
+  for (const text of ['Stay here beside me', '我说 Stay here', '君が好きだよ']) assert.throws(() => parse({ songLanguage: 'zh',
+    translations: [{ unitId: 43, text: '' }] }, [{ unitId: 43, text }], options), /SOURCE_LANGUAGE_MISMATCH/u);
+});
