@@ -17,7 +17,9 @@ export const resolveLyricTranslationNeed = (original, song, {targetLanguage = 'z
       : sourceLanguage === 'th' ? /\p{Script=Thai}/u.test(text) : latin;
   if (!expected) return result('unknown','script_mismatch');
   if (['zh','yue'].includes(sourceLanguage) && (kana || /[\p{Script=Hangul}\p{Script=Cyrillic}\p{Script=Thai}]/u.test(text))) return result('unknown','mixed_content');
-  if ((['zh','yue','ja'].includes(sourceLanguage) && latin) || (!['zh','yue','ja'].includes(sourceLanguage) && han)) return result('unknown','mixed_content');
+  const latinPassage = original.lines.some(row => /\p{Script=Latin}/u.test(row.text)
+    && !(/\p{Script=Han}/u.test(row.text) && [...row.text.matchAll(/\p{Script=Latin}+/gu)].length === 1));
+  if ((['zh','yue','ja'].includes(sourceLanguage) && latinPassage) || (!['zh','yue','ja'].includes(sourceLanguage) && han)) return result('unknown','mixed_content');
   return result(spoken(sourceLanguage) === spoken(targetLanguage) ? 'not_needed' : 'needed','catalog_language');
 };
 export const getCurrentLyricTranslationDecision = (artifact, song, {targetLanguage} = {}) => {

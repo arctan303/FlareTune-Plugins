@@ -19,6 +19,14 @@ export function isPreservedEnglishVocalization(text, language, translation) {
 export function chineseTextWithoutVocalizations(text) {
   if (typeof text !== 'string' || !/\p{Script=Han}/u.test(text)) return null;
   const tokens = text.match(/\p{Script=Latin}+/gu) || [];
-  if (!isPreservedEnglishVocalization(tokens.join(' '), 'en', '')) return null;
-  return text.replace(/\p{Script=Latin}+/gu, '');
+  if (isPreservedEnglishVocalization(tokens.join(' '), 'en', '')) return text.replace(/\p{Script=Latin}+/gu, '');
+  // In a line such as Chinese + "SHOW HA", remove only the unmistakable
+  // laughter for analysis. Keep SHOW (and articles such as "a") so the normal
+  // host policy still decides whether the remaining phrase needs translation.
+  let changed = false;
+  const analyzed = text.replace(/\p{Script=Latin}+/gu, token => {
+    if (!/^(?:ha+|hah+|(?:ha){2,})$/iu.test(token)) return token;
+    changed = true; return '';
+  });
+  return changed ? analyzed : null;
 }

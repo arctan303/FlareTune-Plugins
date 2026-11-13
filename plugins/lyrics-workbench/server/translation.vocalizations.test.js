@@ -62,7 +62,14 @@ test('Chinese text with embedded vocal sounds may remain empty without a fabrica
 });
 
 test('masking vocal sounds never hides a semantic foreign phrase or another script', () => {
-  for (const text of ['我说 Stay here', '我听见 Ha Ha そして']) assert.throws(() => parse({ songLanguage: 'zh',
+  for (const text of ['我说 Stay here', '我听见 Ha Ha そして', '我说 a hand', '我说 Oh no', '我说 Ha stay here']) assert.throws(() => parse({ songLanguage: 'zh',
     unitLanguages: [{ unitId: 41, language: 'zh' }], translations: [{ unitId: 41, text: '' }] },
   [{ unitId: 41, text }], options), /SOURCE_LANGUAGE_MISMATCH/u);
+});
+
+test('laughter beside an isolated borrowed word is assessed after retaining that word', () => {
+  const source = [{ unitId: 41, text: '我在台上 SHOW HA 给你看' }];
+  const result = parse({ songLanguage: 'zh', unitLanguages: [{ unitId: 41, language: 'zh' }],
+    translations: [{ unitId: 41, text: '' }] }, source, options);
+  assert.equal(result.translations, null); assert.equal(source[0].text, '我在台上 SHOW HA 给你看');
 });
