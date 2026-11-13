@@ -1,10 +1,10 @@
 # 歌词工作台 1.0.0 / Lyrics workspace 1.0.0
 
-状态 / Status：**候选与发布准备中，尚未正式发布 / Release candidate; not yet formally released.** 正式发布须先完成 dev 实测、完整验证及独立复核；本说明不是已上线或全部测试通过的声明。
+状态 / Status：**1.0.0 正式版 / Stable release.** 已完成完整本地测试、dev 实测及独立复核；站点安装状态以其管理员的构建与激活回读为准。 / Full local tests, dev validation and independent review are complete; each site's installed state depends on its own build and activation.
 
 ## 中文
 
-这是歌词工作台首个正式版本的候选。保留歌词查看、候选选择、编辑、时间调整、导入、导出及恢复能力，简化自动获取与 AI 补译链路；客户端继续只消费现有歌词接口，不承担语言或翻译资格判断。
+这是歌词工作台首个正式版本。保留歌词查看、候选选择、编辑、时间调整、导入、导出及恢复能力，简化自动获取与 AI 补译链路；客户端继续只消费现有歌词接口，不承担语言或翻译资格判断。
 
 ### 歌词与翻译
 
@@ -41,7 +41,7 @@
 
 ## English
 
-This is the candidate for the first formal release of Lyrics workspace. Viewing, candidate selection, editing, timing adjustments, import, export and recovery remain available. The update simplifies retrieval and AI translation. Consumer clients continue to use the existing lyric API; language and translation eligibility remain server responsibilities.
+This is the first formal release of Lyrics workspace. Viewing, candidate selection, editing, timing adjustments, import, export and recovery remain available. The update simplifies retrieval and AI translation. Consumer clients continue to use the existing lyric API; language and translation eligibility remain server responsibilities.
 
 ### Lyrics and translation
 
