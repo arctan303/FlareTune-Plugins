@@ -3,6 +3,7 @@ import { requirePluginSession } from "@flaretune/plugin-sdk/server/plugin-common
 import { getYouTubeBinding } from "./connection.js";
 import { createYouTubeService } from "./service.js";
 import { YouTubeError } from "./core.js";
+import { loadYouTubeSettings } from "./settings.js";
 import { handleLocalMusicReadRoute } from "@flaretune/plugin-sdk/server/music-catalog";
 import { handleLocalAlbumReadRoute } from "@flaretune/plugin-sdk/server/album-catalog";
 import { handleLocalMusicDiscoveryRoute } from "@flaretune/plugin-sdk/server/catalog-discovery";
@@ -21,7 +22,8 @@ const pageOf = url => {
   return { limit: +limit, offset: +offset };
 };
 const languageOf = url => {
-  const hl = url.searchParams.get('hl') || 'en';
+  const hl = url.searchParams.get('hl');
+  if (hl === null) return undefined;
   if (!/^[a-z]{2,3}(?:-[A-Za-z]{2,4})?$/u.test(hl)) fail('invalid_input', 400);
   return hl;
 };
@@ -29,17 +31,18 @@ const inactiveCodes = new Set(['PLUGIN_NOT_INSTALLED', 'PLUGIN_NOT_FOUND', 'PLUG
 const codeOf = error => error?.code || error?.message || '';
 
 export async function createYouTubeAccess(env, session, ctx, { bindingFor = getYouTubeBinding,
-  createService = createYouTubeService, checkSession = requirePluginSession } = {}) {
+  createService = createYouTubeService, checkSession = requirePluginSession, settingsFor = loadYouTubeSettings } = {}) {
   await checkSession(env, session);
   const binding = await bindingFor(env);
-  const service = createService({ env, credentials: binding.credentials, epoch: binding.epoch, ctx });
+  const settings = await settingsFor(env.DB);
+  const service = createService({ env, credentials: binding.credentials, epoch: binding.epoch, ctx, settings });
   const assertCurrent = async () => {
     await checkSession(env, session);
     const current = await bindingFor(env, { expectedEpoch: binding.record.epoch });
     if (current.epoch !== binding.epoch) fail('YOUTUBE_CONNECTION_CHANGED');
     return true;
   };
-  return { service, assertCurrent, epoch: binding.epoch };
+  return { service, assertCurrent, epoch: binding.epoch, settings };
 }
 
 export function youtubeLyricDependencies(env, session, ctx, options = {}) {
@@ -152,11 +155,15 @@ export async function handleYouTubeMusicRoute(request, url, env, session, ctx, o
       }
       const result = await access.service.search(url.searchParams.get('q').trim(), {
         filter: field === 'songs' ? 'song' : field === 'artists' ? 'artist' : 'album', hl: languageOf(url), ...page });
-      await access.assertCurrent();
       remote = (result[field] || []).slice(page.offset, page.offset + page.limit);
       remoteHasMore = Boolean(result.hasMore);
+      if (field === 'songs' && typeof access.service.projectSearchDisplayTitles === 'function') {
+        remote = await access.service.projectSearchDisplayTitles(remote, { signal: request.signal });
+      }
+      await access.assertCurrent();
     } catch (error) {
       if (inactiveCodes.has(codeOf(error))) return json(payload);
+      remote = []; remoteHasMore = false;
       warning = { source: 'youtube', code: /429|RATE|rate/u.test(codeOf(error)) ? 'rate_limited' : 'unavailable',
         ...(error instanceof YouTubeError ? { reason: error.code } : {}) };
     }

@@ -227,3 +227,27 @@ test('consumer imports cannot name a provider private credential module', async 
   await writeFile(resolve(base, 'server/value.js'), "import { secret } from '@flaretune/plugin-service/provider/server/_private/secrets.js'; export const value = secret;");
   await assert.rejects(createArtifact('sample', { root }));
 });
+
+for (const hostApiVersion of [2, 3, 4]) {
+  test('schema-2 publisher preserves the minimum host API requirement: ' + hostApiVersion, async t => {
+    const { root, base } = await fixture(t);
+    const file = resolve(base, 'manifest.json');
+    const manifest = JSON.parse(await readFile(file, 'utf8'));
+    await writeFile(file, JSON.stringify({ ...manifest, hostApiVersion }));
+    const built = await createArtifact('sample', { root });
+    assert.equal(built.artifact.schemaVersion, 2);
+    assert.equal(built.artifact.manifest.hostApiVersion, hostApiVersion);
+    assert.equal(built.digest, createHash('sha256').update(built.bytes).digest('hex'));
+    assert.equal(JSON.parse(built.bytes).manifest.hostApiVersion, hostApiVersion);
+  });
+}
+
+test('publisher rejects unsupported minimum host API values without reinterpreting old artifact schemas', async t => {
+  const { root, base } = await fixture(t);
+  const file = resolve(base, 'manifest.json');
+  const manifest = JSON.parse(await readFile(file, 'utf8'));
+  for (const hostApiVersion of [0, 1, 5, '2', '3', '4', null]) {
+    await writeFile(file, JSON.stringify({ ...manifest, hostApiVersion }));
+    await assert.rejects(createArtifact('sample', { root }), { code: 'PUBLISH_MANIFEST_INVALID' });
+  }
+});

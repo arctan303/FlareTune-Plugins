@@ -5,6 +5,7 @@ import {youtubeSettingsMessage} from '../shared/settingsMessages.js';
 
 const nodes=tree=>tree&&typeof tree==='object'?[tree,...[tree.props?.action,...(tree.props?.children||[])].flat(Infinity).flatMap(nodes)]:[];
 const text=node=>typeof node==='string'?node:(node?.props?.children||[]).flat(Infinity).map(text).join('');
+const sectionOf=tree=>nodes(tree).find(n=>n.type==='section');
 function fixture({initial={connected:true,connectedAt:1,revision:2,cacheAvailable:true},failRead=false,disconnect}={}){
   const calls=[],events=[];let active=true,first=true;
   const host={isCurrent:()=>active,musicSources:{changed:()=>events.push('changed')},request:async(path,options)=>{
@@ -15,13 +16,14 @@ function fixture({initial={connected:true,connectedAt:1,revision:2,cacheAvailabl
   }};
   const view=createBackgroundModuleHarness({file:new URL('./YouTubeSettings.jsx',import.meta.url),modules:{'@flaretune/plugin-sdk':{
     t:key=>key,useLocale:()=> 'en',InfoTip:'tip',SettingsSection:'section',SettingsActions:'actions',SettingsButton:'button',SettingsSkeleton:'skeleton',
-  }},globals:{setTimeout:()=>1,clearTimeout(){}}});
+  },'./YouTubePreferences.jsx':'preferences'},globals:{setTimeout:()=>1,clearTimeout(){}}});
   return{...view,host,calls,events,retire(){active=false},renderSettings(){return view.render({host})}};
 }
 test('YouTube connection summary exposes one primary action and separates unlink from the header',async()=>{
   const f=fixture();f.renderSettings();await flushBackgroundAsync();const tree=f.renderSettings();
-  assert.equal(tree.props.title,'账号连接');assert.equal(tree.props.action.props.variant,'secondary');
-  assert.equal(text(tree.props.action),'重新连接 YouTube');assert.match(text(tree),/YouTube Music 已连接/);
+  assert.equal(sectionOf(tree).props.title,'账号连接');assert.equal(sectionOf(tree).props.action.props.variant,'secondary');
+  assert.equal(text(sectionOf(tree).props.action),'重新连接 YouTube');assert.match(text(tree),/YouTube Music 已连接/);
+  assert.ok(nodes(tree).some(n=>n.type==='preferences'),'language and lyric settings remain part of the page');
   assert.equal(nodes(tree).some(n=>['input','textarea','select','form'].includes(n.type)),false);
   const danger=nodes(tree).find(n=>n.type==='div'&&n.props.className?.includes('border-t'));
   assert.match(text(danger),/Disconnecting removes this site/);
@@ -32,20 +34,20 @@ test('unlink preserves the connection until the authoritative response and passe
   let finish;const pending=new Promise(yes=>finish=yes),f=fixture({disconnect:()=>pending});
   f.renderSettings();await flushBackgroundAsync();let tree=f.renderSettings();
   const request=nodes(tree).find(n=>n.type==='button'&&n.props.variant==='danger').props.onClick();
-  tree=f.renderSettings();assert.match(text(tree),/YouTube Music 已连接/);assert.equal(tree.props.action.props.disabled,true);
+  tree=f.renderSettings();assert.match(text(tree),/YouTube Music 已连接/);assert.equal(sectionOf(tree).props.action.props.disabled,true);
   assert.equal(f.calls.at(-1).path,'connection/disconnect');assert.equal(f.calls.at(-1).options.body.revision,2);
   finish({connected:false,connectedAt:null,revision:3,cacheAvailable:true});await request;await flushBackgroundAsync();tree=f.renderSettings();
   assert.match(text(tree),/YouTube Music 未连接/);assert.equal(nodes(tree).some(n=>n.props.variant==='danger'),false);assert.deepEqual(f.events,['changed']);f.unmount();
 });
 test('an unreadable status stays unknown and offers a retry without starting authorization',async()=>{
   const f=fixture({failRead:true});f.renderSettings();await flushBackgroundAsync();let tree=f.renderSettings();
-  assert.doesNotMatch(text(tree),/YouTube Music 未连接/);assert.equal(tree.props.action.props.disabled,true);
+  assert.doesNotMatch(text(tree),/YouTube Music 未连接/);assert.equal(sectionOf(tree).props.action.props.disabled,true);
   nodes(tree).find(n=>n.type==='button'&&text(n)==='重试').props.onClick();await flushBackgroundAsync();tree=f.renderSettings();
   assert.match(text(tree),/YouTube Music 已连接/);assert.equal(f.calls.length,2);assert.equal(f.calls.every(c=>c.path==='status'),true);f.unmount();
 });
 test('device authorization remains an explicit operation and shows the real pending code',async()=>{
   const f=fixture({initial:{connected:false,revision:2,cacheAvailable:true}});f.renderSettings();await flushBackgroundAsync();
-  await f.renderSettings().props.action.props.onClick();await flushBackgroundAsync();const tree=f.renderSettings();
+  await sectionOf(f.renderSettings()).props.action.props.onClick();await flushBackgroundAsync();const tree=f.renderSettings();
   assert.match(text(tree),/ABCD-EFGH/);assert.equal(f.calls.at(-1).path,'connection/start');
   assert.equal(nodes(tree).find(n=>n.type==='a').props.href,'https://youtube.com/activate');f.unmount();
 });

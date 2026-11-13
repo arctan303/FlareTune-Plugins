@@ -1,7 +1,7 @@
 {
   "id": "youtube-music",
-  "version": "0.1.1",
-  "hostApiVersion": 2,
+  "version": "0.2.4",
+  "hostApiVersion": 4,
   "apiVersion": 1,
   "dataVersion": 0,
   "name": "YouTube Music",
@@ -22,23 +22,53 @@
   "metadata": {
     "zh": {
       "name": "YouTube Music",
-      "description": "连接一个站点 YouTube 账号，为现有搜索和播放器提供音乐源。"
+      "description": "连接一个站点 YouTube 账号，为现有搜索和播放器提供音乐源。",
+      "introduction": [
+        "把 YouTube Music 加入本站的音乐搜索和播放流程。可以搜索歌曲、歌手和专辑，并使用现有播放器播放来源可用的曲目。",
+        "管理员先进入插件左侧“设置”，在其中完成站点账号授权，再按需要设置地区、资料语言和歌词译文偏好。整个站点只维护一个 YouTube 连接，供本站成员使用；替换或断开会影响成员使用此音源。",
+        "此连接不会同步或改写 YouTube 账号的私人收藏和歌单。可用曲目可以加入本人在 FlareTune 的收藏和混合歌单，这些操作不会写回 YouTube。",
+        "音频按需从上游获取，不导入本站歌曲库，也不替换原有本地歌曲；播放仍依赖 YouTube 音源可用。"
+      ]
     },
     "zh-Hant": {
       "name": "YouTube Music",
-      "description": "連接一個站點 YouTube 帳號，為現有搜尋與播放器提供音樂來源。"
+      "description": "連接一個站點 YouTube 帳號，為現有搜尋與播放器提供音樂來源。",
+      "introduction": [
+        "將 YouTube Music 加入本站的音樂搜尋與播放流程。可以搜尋歌曲、歌手和專輯，並使用既有播放器播放來源可用的曲目。",
+        "管理員先進入外掛左側「設定」，在其中完成站點帳號授權，再依需要設定地區、資料語言與歌詞譯文偏好。整個站點只維護一個 YouTube 連線，供本站成員使用；替換或中斷會影響成員使用此音源。",
+        "此連線不會同步或改寫 YouTube 帳號的私人收藏與播放清單。可用曲目可加入本人在 FlareTune 的收藏與混合播放清單，這些操作不會寫回 YouTube。",
+        "音訊依需求從上游取得，不匯入本站歌曲庫，也不取代既有本機歌曲；播放仍依賴 YouTube 音源可用。"
+      ]
     },
     "en": {
       "name": "YouTube Music",
-      "description": "Connect a site YouTube account to add a music source to search and the player."
+      "description": "Connect a site YouTube account to add a music source to search and the player.",
+      "introduction": [
+        "Adds YouTube Music to the site's existing music search and playback flow. Search for songs, artists and albums, then play available tracks with the existing player.",
+        "An administrator first opens Settings in the plugin's left sidebar and completes the site's account authorization there, then can set the region, metadata language and lyric translation preferences. The site maintains one YouTube connection for its members. Replacing or disconnecting it affects members' access to this source.",
+        "This connection does not sync or modify the YouTube account's private favorites or playlists. Available tracks can be added to your own FlareTune favorites and mixed playlists; those actions do not write back to YouTube.",
+        "Audio is fetched from the upstream source on demand. It is not imported into the site's song library or used to replace existing local songs, and playback still depends on the YouTube source being available."
+      ]
     },
     "ja": {
       "name": "YouTube Music",
-      "description": "サイト用のYouTubeアカウントを接続し、検索とプレーヤーに音楽ソースを追加します。"
+      "description": "サイト用のYouTubeアカウントを接続し、検索とプレーヤーに音楽ソースを追加します。",
+      "introduction": [
+        "サイトの既存の音楽検索と再生に YouTube Music を追加します。曲、アーティスト、アルバムを検索し、利用可能な曲を既存のプレーヤーで再生できます。",
+        "まず管理者がプラグインの左側にある「設定」を開き、そこでサイト用アカウントの認証を完了してから、必要に応じて地域、情報の言語、歌詞翻訳を設定します。サイトではメンバー用に一つの YouTube 接続を共有するため、接続の変更や解除はメンバーのこの音源の利用に影響します。",
+        "この接続では YouTube アカウントの非公開のお気に入りやプレイリストを同期・変更しません。利用可能な曲は自分の FlareTune のお気に入りや混合プレイリストに追加でき、これらの操作が YouTube に書き戻されることはありません。",
+        "音声は必要に応じて上流の音源から取得します。サイトの曲ライブラリへの取り込みや既存のローカル曲の置き換えは行わず、再生には引き続き YouTube 音源が利用可能である必要があります。"
+      ]
     },
     "ko": {
       "name": "YouTube Music",
-      "description": "사이트 YouTube 계정을 연결하여 검색과 플레이어에 음악 소스를 추가합니다."
+      "description": "사이트 YouTube 계정을 연결하여 검색과 플레이어에 음악 소스를 추가합니다.",
+      "introduction": [
+        "사이트의 기존 음악 검색과 재생 흐름에 YouTube Music을 추가합니다. 곡, 아티스트와 앨범을 검색하고 사용 가능한 곡을 기존 플레이어로 재생할 수 있습니다.",
+        "먼저 관리자가 플러그인 왼쪽의 ‘설정’을 열어 그 안에서 사이트 계정 인증을 완료한 뒤 필요에 따라 지역, 정보 언어와 가사 번역 설정을 정합니다. 사이트는 구성원을 위한 하나의 YouTube 연결을 공유하므로 연결을 바꾸거나 해제하면 구성원의 해당 음원 사용에 영향을 줍니다.",
+        "이 연결은 YouTube 계정의 비공개 즐겨찾기나 재생목록을 동기화하거나 수정하지 않습니다. 사용 가능한 곡을 자신의 FlareTune 즐겨찾기와 혼합 재생목록에 추가할 수 있으며 이 작업이 YouTube에 기록되지는 않습니다.",
+        "오디오는 필요할 때 원본 음원에서 가져옵니다. 사이트의 곡 라이브러리로 가져오거나 기존 로컬 곡을 대체하지 않으며, 재생하려면 YouTube 음원을 계속 사용할 수 있어야 합니다."
+      ]
     }
   },
   "messages": {

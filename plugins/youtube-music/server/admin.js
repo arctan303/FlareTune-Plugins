@@ -4,6 +4,9 @@ import { AuthError } from "@flaretune/plugin-sdk/server/auth";
 import { readYouTubeConnection, saveYouTubeConnection, publicYouTubeStatus, validYouTubeCredentials } from "./connection.js";
 import { createYouTubeService } from "./service.js";
 import { upstreamFetch } from "./upstream.js";
+import { createPluginOperationLease } from "@flaretune/plugin-sdk/server/service-leases";
+import { InstanceAdminError } from "@flaretune/plugin-sdk/server/admin-common";
+import { readYouTubeSettings, saveYouTubeSettings } from "./settings.js";
 
 Log.setLevel(Log.Level.NONE);
 const fail = (code, status = 409) => { throw new AuthError(code, status); };
@@ -28,6 +31,26 @@ export function createYouTubeHandler(env, session, services = {}) {
   const publicStatus = record => ({ ...publicYouTubeStatus(record), cacheAvailable: Boolean(env.YTM_KV) });
   return async ({ request, path, scope, context, json }) => {
     if (scope !== 'admin' || context.identity.role !== 'admin') return json({ error: 'forbidden' }, 403);
+    if (path === '/settings') {
+      const lease = await (services.createLease || createPluginOperationLease)({ env, session,
+        pluginId: 'youtube-music', context, admin: true });
+      const db = lease.guardedDb(env.DB);
+      try {
+        let setting;
+        if (request.method === 'GET') setting = await (services.readSettings || readYouTubeSettings)(db, context.identity.accountId);
+        else if (request.method === 'PUT') {
+          const body = await readBoundedJson(request, 8192);
+          if (!body || !allowedKeys(body, ['value', 'expectedRevision']) || !Object.hasOwn(body, 'value')
+            || !validRevision(body.expectedRevision)) fail('invalid_input', 400);
+          setting = await (services.saveSettings || saveYouTubeSettings)(db, context.identity.accountId, body.value, body.expectedRevision);
+        } else return json({ error: 'method_not_allowed' }, 405);
+        await lease.assertCurrent();
+        return json({ setting });
+      } catch (error) {
+        if (error instanceof InstanceAdminError) return json({ error: error.code }, error.status);
+        throw error;
+      }
+    }
     const record = await read(env, { expectedEpoch: context.plugin.epoch });
     if (path === '/status' && request.method === 'GET') return json(publicStatus(record));
     if (request.method !== 'POST' || !['/connection/start', '/connection/poll', '/connection/import', '/connection/disconnect'].includes(path)) return null;

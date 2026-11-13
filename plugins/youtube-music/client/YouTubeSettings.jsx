@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { t, useLocale, InfoTip, SettingsSection, SettingsButton, SettingsSkeleton } from "@flaretune/plugin-sdk";
 import { youtubeSettingsMessage } from '../shared/settingsMessages.js';
 
+import YouTubePreferences from './YouTubePreferences.jsx';
+
 export default function YouTubeSettings({ host }) {
   const locale = useLocale();
   const [status, setStatus] = useState(null), [pending, setPending] = useState(null);
@@ -51,7 +53,7 @@ export default function YouTubeSettings({ host }) {
     } finally { if (host.isCurrent()) setBusy(false); }
   };
   if (!status && !error) return <SettingsSkeleton cards={1} rows={2} />;
-  return <SettingsSection title={t('账号连接')} action={
+  return <div className="space-y-5"><SettingsSection title={t('账号连接')} action={
     <SettingsButton variant={status?.connected ? 'secondary' : 'primary'} disabled={busy || !status} onClick={() => change('start')}>{t(status?.connected ? '重新连接 YouTube' : '连接 YouTube')}</SettingsButton>
   }>
     <div className="space-y-3 text-sm leading-relaxed">
@@ -77,5 +79,5 @@ export default function YouTubeSettings({ host }) {
       <p className="min-w-0 flex-1 text-xs leading-relaxed text-[var(--muted)]">{youtubeSettingsMessage('disconnectConsequence', locale)}</p>
       <SettingsButton variant="danger" disabled={busy} onClick={() => change('disconnect')}>{t('断开本网站的 YouTube 连接')}</SettingsButton>
     </div>}
-  </SettingsSection>;
+  </SettingsSection><YouTubePreferences host={host} /></div>;
 }

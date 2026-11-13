@@ -12,9 +12,10 @@ export function browseOf(value, kind) {
   if (!pattern.test(value || '')) throw new YouTubeError('YOUTUBE_INVALID_BROWSE_ID', 400);
   return value;
 }
-export function localeOf(hl = 'en') {
+export function localeOf(hl = 'en', gl = 'US') {
   if (!/^[a-zA-Z]{2,3}(?:[-_][a-zA-Z]{2,4})?$/.test(hl)) throw new YouTubeError('YOUTUBE_INVALID_LANGUAGE', 400);
-  return { lang: hl, location: 'US' };
+  if (typeof gl !== 'string' || !/^[A-Z]{2}$/u.test(gl)) throw new YouTubeError('YOUTUBE_INVALID_REGION', 400);
+  return { lang: hl, location: gl };
 }
 export function imageTarget(value) {
   let url; try { url = new URL(value); } catch { throw new YouTubeError('YOUTUBE_INVALID_IMAGE_URL', 400); }
