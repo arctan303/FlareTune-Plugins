@@ -23,7 +23,7 @@ import {
   buildLyricTranslationDecision,
   LYRIC_TRANSLATION_POLICY_VERSION,
 } from "@flaretune/plugin-sdk/server/lyric-workflow";
-import { beginLyricAssetAiCompletion, resolveLegacyLyricCleanup } from "./translation.js";
+import { beginLyricAssetAiCompletion, resolveLegacyLyricCleanup, safeLyricValidationDiagnostic } from "./translation.js";
 import { completeLyricDraft } from "./draftAi.js";
 import { verifyLyricDraftReceiptData } from "./draftReceipt.js";
 import { loadLyricAiConfig, loadLyricAiProcessingSettings } from "./config.js";
@@ -524,7 +524,10 @@ export async function handleLyricsWorkbenchRoute(request, url, db, headers = {},
               ? 'Lyric draft cannot be processed' : 'AI completion failed', headers);
       }
       if (result.status !== 'ready') {
-        return failure(503, 'LYRIC_AI_FAILED', result.errorCode || 'AI completion failed', headers);
+        const diagnostic = safeLyricValidationDiagnostic(result.diagnostic);
+        return failure(503, 'LYRIC_AI_FAILED', result.errorCode || 'AI completion failed', headers,
+          diagnostic ? { diagnostic: { code: diagnostic.validationCode, stage: diagnostic.stage,
+            ...(diagnostic.batchIndex === undefined ? {} : { batch: diagnostic.batchIndex }) } } : undefined);
       }
       return success(result, 200, headers);
     }

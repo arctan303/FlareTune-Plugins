@@ -18,6 +18,39 @@ const DEFAULT_DAILY_LIMIT = 50;
 const AI_COMPLETION_DEADLINE_MS = 24_000;
 // ai.js treats shorter overrides as invalid, so stop before it could fall back to 90 seconds.
 const MIN_AI_REQUEST_BUDGET_MS = 5_000;
+const VALIDATION_CODES = new Set([
+  'INVALID_TARGET_LANGUAGE', 'NO_TRANSLATABLE_LINES', 'INVALID_BATCH_LIMIT', 'INVALID_JSON',
+  'INVALID_NOT_NEEDED', 'INVALID_RESPONSE_FIELDS', 'INVALID_COVERAGE', 'INVALID_TRANSLATION_INDEX',
+  'INVALID_TRANSLATION_TEXT', 'TARGET_LANGUAGE_MISMATCH', 'UNCHANGED_TRANSLATION',
+  'INVALID_UNIT_LANGUAGES', 'INVALID_LANGUAGE_SEGMENTS', 'SOURCE_LANGUAGE_MISMATCH',
+  'TARGET_SEGMENT_REWRITTEN', 'LANGUAGE_UNDETERMINED', 'INVALID_TRANSLATION_OUTPUT',
+  'INVALID_LYRIC_TRANSLATION_DECISION',
+]);
+const VALIDATION_STAGES = new Set(['setup', 'validation', 'finalization']);
+// Provenance stays in memory: upstream errors cannot impersonate local
+// validation by using a matching message, and nothing is added to the artifact.
+const validationFailures = new WeakMap();
+export function safeLyricValidationDiagnostic(value) {
+  if (!value || typeof value !== 'object') return null;
+  const { validationCode, stage, batchIndex } = value;
+  const hasBatch = Object.hasOwn(value, 'batchIndex');
+  if (!VALIDATION_CODES.has(validationCode) || !VALIDATION_STAGES.has(stage)
+    || hasBatch && (!Number.isInteger(batchIndex) || batchIndex < 0 || batchIndex >= 2000)) return null;
+  return { validationCode, stage, ...(hasBatch ? { batchIndex } : {}) };
+}
+function markValidationFailure(error, stage, batchIndex) {
+  const diagnostic = safeLyricValidationDiagnostic({ validationCode: error?.message, stage,
+    ...(batchIndex === undefined ? {} : { batchIndex }) });
+  if (diagnostic && error && typeof error === 'object') validationFailures.set(error, diagnostic);
+  return error;
+}
+function validateCompletion(operation, stage, batchIndex) {
+  try {
+    const result = operation();
+    return result && typeof result.then === 'function'
+      ? result.catch(error => { throw markValidationFailure(error, stage, batchIndex); }) : result;
+  } catch (error) { throw markValidationFailure(error, stage, batchIndex); }
+}
 const LANGUAGE_INSTRUCTION = `同时根据本批 units 和 languageSample 中真正演唱的歌词判断原文语言，不要根据歌名、歌手名或署名判断。每批都必须返回 songLanguage 字段，值只能是 zh、ja、en、ko、ru、es、fr、de、sv、vi、yue、it、th、pt 或 other。多语言时选占主导语言，并返回覆盖本批全部unitId的 unitLanguages:[{"unitId":0,"language":"zh"}]；同目标语言行译文留空，不能改写。同一行多语用languages数组及完整覆盖原文的segments，每段声明text/language，仅外语段可带translation，translations.text只拼接外语段译文。无法可靠判断时使用other，不能返回notNeeded。notNeeded:true仅表示本批全部正文无需翻译，不能与translations同时存在。即使返回notNeeded也必须提供songLanguage。繁简中文转换不算翻译。目标译文语言与歌曲语种是两个概念；若返回 translationLanguage，须标识实际译文目标（可为 zh-Hant），但 songLanguage 仍只用上述歌曲语种枚举，不能用 zh-Hant。拉丁字母不能直接判定为英语，证据不足时返回 other。`;
 const CLEANUP_INSTRUCTION = `歌曲 title 和 artist 仅用于识别上下文，不能写进歌词。检查 cleanupUnits 中不属于实际演唱的整行内容，例如开头的歌名歌手资料、Lyrics by / Composed by 等制作署名、广告、乱码和无效正文。只把确定应整行删除的 index 放入 discardLineIndices；标题若也是实际唱出的歌词，应保留演唱位置的那一行。拿不准时保留。不得改写任何原文、增添歌词行、修改行时间戳或逐字时间点。若同时返回 translations，仍须与 units 一一对应；服务端会丢弃被标记整行及其译文。即使返回 notNeeded，也必须提供 discardLineIndices。`;
 
@@ -254,17 +287,17 @@ export async function runLyricAssetAiCompletion({
       const initialNeed = resolveLyricTranslationNeed(artifact.original, song, { targetLanguage: target });
       if (access.config.translateLyrics !== false && (hasCurrentLyricNoTranslationDecision(artifact, song, { targetLanguage: target })
         || initialNeed.state === 'not_needed')) {
-        return conditionallyFinish(store, song.id, startedAt, textHash, current => ({ ...current,
+        return conditionallyFinish(store, song.id, startedAt, textHash, current => validateCompletion(() => ({ ...current,
           translationDecision: hasCurrentLyricNoTranslationDecision(current, song, { targetLanguage: target }) ? current.translationDecision
             : buildLyricNoTranslationDecision(current, song, { targetLanguage: target, sourceLanguage: initialNeed.sourceLanguage,
               basis: initialNeed.sourceLanguage ? 'tag' : 'rules' }),
           aiCompletion: { status: 'completed', processingKey: lyricAiProcessingKey(access.config), updatedAt: new Date((deps.now || Date.now)()).toISOString() },
           updatedAt: new Date((deps.now || Date.now)()).toISOString(),
-        }));
+        }), 'finalization'));
       }
 
       const units = completionUnits(artifact.original, song);
-      if (units.length === 0) throw new Error('NO_TRANSLATABLE_LINES');
+      if (units.length === 0) throw markValidationFailure(new Error('NO_TRANSLATABLE_LINES'), 'setup');
       // A sung title still needs its translated row. The separate language
       // sample keeps the provider-metadata exclusions to avoid biasing inference.
       const languageUnits = units.filter(unit => !isLeadingProviderMetadata(artifact.original.lines[unit.index], unit.index, song));
@@ -299,7 +332,7 @@ export async function runLyricAssetAiCompletion({
       const decisionSong = () => inferredLanguage && !/^yt:[A-Za-z0-9_-]{11}$/u.test(song.id)
         ? { ...song, language: inferredLanguage } : song;
       let retriedInvalidJson = false;
-      const askForBatch = async (batch, firstAnalysis = false, analysisOnly = false) => {
+      const askForBatch = async (batch, firstAnalysis = false, analysisOnly = false, batchIndex = 0) => {
         let messages = withAnalysisRequest(batch.messages, languageUnits, artifact.original,
           { detectLanguage, cleanDirtyLyrics: firstAnalysis && cleanDirtyLyrics });
         if (analysisOnly) messages = [
@@ -327,8 +360,8 @@ export async function runLyricAssetAiCompletion({
           ? { ...assistantConfig, enableThinking: false }
           : assistantConfig;
         const parseResponse = (response) => {
-          const parsed = parseLanguageAwareTranslationResponse(response, batch.units,
-            { targetLanguage, allowedCleanupIndices, sourceLanguage: validationLanguage, analysisOnly });
+          const parsed = validateCompletion(() => parseLanguageAwareTranslationResponse(response, batch.units,
+            { targetLanguage, allowedCleanupIndices, sourceLanguage: validationLanguage, analysisOnly }), 'validation', batchIndex);
           if (detectLanguage && parsed.language && !inferredLanguage) inferredLanguage = parsed.language;
           if (parsed.sourceLanguage && (!validationLanguage || firstAnalysis)) validationLanguage = parsed.sourceLanguage;
           hasForeignPassages ||= parsed.hasForeignPassages === true;
@@ -365,15 +398,15 @@ export async function runLyricAssetAiCompletion({
       // responses. Smaller outputs retain context while fitting the same deadline.
       const compactJsonBatches = (assistantConfig.source || assistantConfig.provider) === 'deepseek'
         && ['deepseek-flash', 'deepseek-v4-pro'].includes(assistantConfig.model);
-      const batches = buildTranslationBatches(units, song.title, song.artist,
-        { targetLanguage, referenceByUnitId, ...(compactJsonBatches ? { maxUnits: 20 } : {}) });
+      const batches = validateCompletion(() => buildTranslationBatches(units, song.title, song.artist,
+        { targetLanguage, referenceByUnitId, ...(compactJsonBatches ? { maxUnits: 20 } : {}) }), 'setup');
       if (!translateLyrics) {
         if (detectLanguage || cleanDirtyLyrics) {
           await askForBatch(batches[0], true, true);
         }
       } else {
         for (const [index, batch] of batches.entries()) {
-          const parsed = await askForBatch(batch, index === 0 && (detectLanguage || cleanDirtyLyrics));
+          const parsed = await askForBatch(batch, index === 0 && (detectLanguage || cleanDirtyLyrics), false, index);
           if (parsed === null) {
             notNeededBatches.push(batch);
             continue;
@@ -388,12 +421,12 @@ export async function runLyricAssetAiCompletion({
         access.budget?.settle();
         const completedAt = new Date((deps.now || Date.now)()).toISOString();
         const finished = await conditionallyFinish(store, song.id, startedAt, textHash,
-          async current => {
+          current => validateCompletion(async () => {
             const next = await applySuggestedCleanup(current, cleanupIndices, completedAt, song, lyricAiProcessingKey(assistantConfig));
             if (translateLyrics) next.translationDecision = buildLyricNoTranslationDecision(next, decisionSong(),
               { targetLanguage, sourceLanguage: validationLanguage || inferredLanguage, basis: 'ai' });
             return next;
-          });
+          }, 'finalization'));
         return finishWithInferredLanguage(store, db, song, finished, inferredLanguage, deps);
       }
       for (const batch of notNeededBatches) {
@@ -401,12 +434,12 @@ export async function runLyricAssetAiCompletion({
         // Reissuing it with forced translations would create a same-language rewrite.
         batch.units.forEach(({ unitId }) => translatedByIndex.set(unitId, ''));
       }
-      if (translatedByIndex.size !== units.length) throw new Error('INVALID_COVERAGE');
+      if (translatedByIndex.size !== units.length) throw markValidationFailure(new Error('INVALID_COVERAGE'), 'finalization');
       access.budget?.settle();
 
       const completedAt = new Date((deps.now || Date.now)()).toISOString();
       const lines = artifact.original.lines.map((_line, index) => translatedByIndex.get(index) || '');
-      const finished = await conditionallyFinish(store, song.id, startedAt, textHash, async current => {
+      const finished = await conditionallyFinish(store, song.id, startedAt, textHash, current => validateCompletion(async () => {
         const next = await applySuggestedCleanup({
           ...current, translation: {
           source: 'ai',
@@ -424,18 +457,20 @@ export async function runLyricAssetAiCompletion({
         // completed decision supplies language evidence for virtual/unknown songs.
         if (!projectLyricArtifact(next, { song: decisionSong(), targetLanguage })?.translation) throw new Error('INVALID_TRANSLATION_OUTPUT');
         return next;
-      });
+      }, 'finalization'));
       return finishWithInferredLanguage(store, db, song, finished, inferredLanguage, deps);
     });
   } catch (error) {
     access.budget?.settle();
     try { await access.client.assertCurrent(); } catch { return { state: 'superseded' }; }
     const failedAt = new Date((deps.now || Date.now)()).toISOString();
-    return conditionallyFinish(store, song.id, startedAt, textHash, (current) => ({
+    const failed = await conditionallyFinish(store, song.id, startedAt, textHash, (current) => ({
       ...current,
       aiCompletion: { status: 'failed', errorCode: access.budget?.depleted ? 'request_budget_exhausted' : safeErrorCode(error), updatedAt: failedAt },
       updatedAt: failedAt,
     }));
+    const diagnostic = !access.budget?.depleted && safeLyricValidationDiagnostic(validationFailures.get(error));
+    return failed.state === 'updated' && diagnostic ? { ...failed, diagnostic } : failed;
   }
 }
 

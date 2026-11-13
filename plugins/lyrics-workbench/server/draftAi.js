@@ -1,5 +1,5 @@
 import { buildEditedLyricArtifact, projectLyricArtifact } from "@flaretune/plugin-sdk/server/lyric-workflow";
-import { runLyricAssetAiCompletion } from "./translation.js";
+import { runLyricAssetAiCompletion, safeLyricValidationDiagnostic } from "./translation.js";
 import { createLyricDraftReceipt } from "./draftReceipt.js";
 
 /** Run the configured lyric AI against an isolated draft. No R2 asset or song
@@ -36,7 +36,9 @@ export async function completeLyricDraft({ env, db, song, lines, translationLang
     return { status: 'failed', errorCode: 'completion_superseded' };
   }
   if (artifact.aiCompletion?.status === 'failed') {
-    return { status: 'failed', errorCode: artifact.aiCompletion.errorCode };
+    const diagnostic = safeLyricValidationDiagnostic(finished.diagnostic);
+    return { status: 'failed', errorCode: artifact.aiCompletion.errorCode,
+      ...(diagnostic ? { diagnostic } : {}) };
   }
   inferredLanguage ||= artifact.translationDecision?.sourceLanguage || null;
   // Local completion binds its decision to the inferred tag without writing
