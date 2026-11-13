@@ -48,7 +48,7 @@ test('all target prompts carry the same fidelity rules with their own requested 
     assert.ok(prompt[0].content.includes(`（${target}）`));
     assert.ok(prompt[0].content.includes('信、达、雅')); assert.deepEqual(JSON.parse(prompt[1].content).units,[{unitId:0,text:'Hello world'}]);
   }
-  assert.equal(getTranslationPromptVersion(),'lyrics-target-v7-language-decision');
+  assert.equal(getTranslationPromptVersion(),'lyrics-target-v8-vocalization');
 });
 
 test('same-request AI language evidence turns an already-target copy into no translation, not a fake layer',()=>{

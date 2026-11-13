@@ -16,6 +16,7 @@ export const resolveLyricTranslationNeed = (original, song, {targetLanguage = 'z
     : sourceLanguage === 'ko' ? /\p{Script=Hangul}/u.test(text) : sourceLanguage === 'ru' ? /\p{Script=Cyrillic}/u.test(text)
       : sourceLanguage === 'th' ? /\p{Script=Thai}/u.test(text) : latin;
   if (!expected) return result('unknown','script_mismatch');
+  if (['zh','yue'].includes(sourceLanguage) && (kana || /[\p{Script=Hangul}\p{Script=Cyrillic}\p{Script=Thai}]/u.test(text))) return result('unknown','mixed_content');
   if ((['zh','yue','ja'].includes(sourceLanguage) && latin) || (!['zh','yue','ja'].includes(sourceLanguage) && han)) return result('unknown','mixed_content');
   return result(spoken(sourceLanguage) === spoken(targetLanguage) ? 'not_needed' : 'needed','catalog_language');
 };

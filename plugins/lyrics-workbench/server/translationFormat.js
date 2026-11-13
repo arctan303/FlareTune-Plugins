@@ -10,9 +10,11 @@ import { isTranslationTarget, normalizeTranslationTarget, targetScriptEvidence, 
 import { computeHash } from "@flaretune/plugin-sdk/server/lyric-parsing";
 import { isValidSongLanguage } from "@flaretune/plugin-sdk/server/song-language";
 import { resolveLyricTranslationNeed } from "@flaretune/plugin-sdk/server/lyric-workflow";
+import { isPreservedEnglishVocalization, chineseTextWithoutVocalizations } from './vocalization.js';
 
 const LRC_TIMESTAMP_ANY_PATTERN = /\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?\]/;
-const TRANSLATION_PROMPT_VERSION = 'lyrics-target-v7-language-decision';
+const TRANSLATION_PROMPT_VERSION = 'lyrics-target-v8-vocalization';
+const VOCALIZATION_INSTRUCTION = 'A Ha、Ha Ha、Oh 等明确无语义的英文拟声可以保留在原文；unitLanguages仍声明en，translations.text留空，行内拟声段也可不提供translation。它们不能单独构成需要翻译的外语正文。普通英文单词、有语义的短句和未知语种不能按拟声跳过。';
 const DEFAULT_MAX_BATCH_UNITS = 120;
 const DEFAULT_MAX_BATCH_CHARACTERS = 12_000;
 const DEFAULT_CONTEXT_UNITS = 4;
@@ -42,7 +44,7 @@ export function buildTranslationPrompt(
 ) {
   if (!Array.isArray(units) || units.length === 0) throw new Error('NO_TRANSLATABLE_LINES');
   return [
-    { role: 'system', content: createSystemPrompt(targetLanguage) },
+    { role: 'system', content: createSystemPrompt(targetLanguage) + '\n\n' + VOCALIZATION_INSTRUCTION },
     {
       role: 'user',
       content: JSON.stringify({
@@ -184,9 +186,20 @@ export function parseLanguageAwareTranslationResponse(aiResponse, expectedUnits,
       discardLineIndices: validCandidates ? [...new Set(discardLineIndices)].sort((a, b) => a - b) : [] };
   }
   const targetLanguage = options.targetLanguage || 'zh';
-  const decisionFor = (units, sourceLanguage) => resolveLyricTranslationNeed({ lines: units.map(unit => ({ text: unit.text })) },
-    { language: sourceLanguage }, { targetLanguage });
+  const decisionFor = (units, sourceLanguage) => {
+    const decide = selected => resolveLyricTranslationNeed({ lines: selected.map(unit => ({ text: unit.text })) },
+      { language: sourceLanguage }, { targetLanguage });
+    const result = decide(units);
+    if (result.state !== 'unknown' || sourceLanguage !== 'zh'
+      || !['zh', 'zh-Hant'].includes(normalizeTranslationTarget(targetLanguage))) return result;
+    const analyzed = units.map(unit => ({ ...unit, text: chineseTextWithoutVocalizations(unit.text) ?? unit.text }));
+    const withoutSounds = decide(analyzed);
+    return withoutSounds.state === 'not_needed' ? withoutSounds : result;
+  };
   let unitDecisions = null;
+  const vocalizationIds = new Set();
+  const responseText = unitId => Array.isArray(translationResponse.translations)
+    ? translationResponse.translations.find(item => item?.unitId === unitId)?.text : undefined;
   if (unitLanguages !== undefined) {
     if (!Array.isArray(unitLanguages) || unitLanguages.length !== expectedUnits.length) throw new Error('INVALID_UNIT_LANGUAGES');
     const expected = new Map(expectedUnits.map(unit => [unit.unitId, unit]));
@@ -201,12 +214,16 @@ export function parseLanguageAwareTranslationResponse(aiResponse, expectedUnits,
           || new Set(item.languages).size !== item.languages.length
           || item.languages.some(language => !isValidSongLanguage(language) || ['instrumental', 'other'].includes(language))
           || !Array.isArray(item.segments) || item.segments.length < 2 || item.segments.length > 128) throw new Error('INVALID_UNIT_LANGUAGES');
-        const foreign = [], used = new Set();
+        const foreign = [], used = new Set(), vocalizations = [];
         for (const segment of item.segments) {
           if (!segment || typeof segment !== 'object' || Array.isArray(segment)
             || Object.keys(segment).some(key => !['text', 'language', 'translation'].includes(key))
             || typeof segment.text !== 'string' || !segment.text || !item.languages.includes(segment.language)) throw new Error('INVALID_LANGUAGE_SEGMENTS');
           used.add(segment.language);
+          if (isPreservedEnglishVocalization(segment.text, segment.language, segment.translation)) {
+            vocalizations.push(segment.text);
+            continue;
+          }
           const part = decisionFor([{ text: segment.text }], segment.language);
           if (part.state === 'unknown') throw new Error('SOURCE_LANGUAGE_MISMATCH');
           if (part.state === 'not_needed') {
@@ -217,6 +234,8 @@ export function parseLanguageAwareTranslationResponse(aiResponse, expectedUnits,
           }
         }
         if (used.size !== item.languages.length || item.segments.map(segment => segment.text).join('') !== expected.get(item.unitId).text) throw new Error('INVALID_LANGUAGE_SEGMENTS');
+        if (!foreign.length && vocalizations.length
+          && isPreservedEnglishVocalization(vocalizations.join(' '), 'en', responseText(item.unitId))) vocalizationIds.add(item.unitId);
         selected.set(item.unitId, { state: foreign.length ? 'needed' : 'not_needed',
           inlineTranslation: foreign.map(segment => segment.translation).join(' '),
           foreignSourceText: foreign.map(segment => segment.text).join(' ') });
@@ -224,6 +243,11 @@ export function parseLanguageAwareTranslationResponse(aiResponse, expectedUnits,
       }
       if (item.segments !== undefined || !isValidSongLanguage(item.language)
         || ['instrumental', 'other'].includes(item.language)) throw new Error('INVALID_UNIT_LANGUAGES');
+      if (isPreservedEnglishVocalization(expected.get(item.unitId).text, item.language, responseText(item.unitId))) {
+        selected.set(item.unitId, { state: 'not_needed' });
+        vocalizationIds.add(item.unitId);
+        continue;
+      }
       const decision = decisionFor([expected.get(item.unitId)], item.language);
       if (decision.state === 'unknown') throw new Error('SOURCE_LANGUAGE_MISMATCH');
       selected.set(item.unitId, decision);
@@ -243,7 +267,11 @@ export function parseLanguageAwareTranslationResponse(aiResponse, expectedUnits,
       discardLineIndices: validCandidates ? [...new Set(discardLineIndices)].sort((a, b) => a - b) : [] };
   }
   const sameTargetIds = new Set(unitDecisions ? [...unitDecisions].filter(([, item]) => item.state === 'not_needed').map(([unitId]) => unitId) : []);
-  const translations = parseTranslationResponse(translationResponse, expectedUnits,
+  const normalizedResponse = vocalizationIds.size && Array.isArray(translationResponse.translations)
+    ? { ...translationResponse, translations: translationResponse.translations.map(item =>
+      vocalizationIds.has(item?.unitId) && typeof item.text === 'string' ? { ...item, text: '' } : item) }
+    : translationResponse;
+  const translations = parseTranslationResponse(normalizedResponse, expectedUnits,
     { ...options, allowUnchanged: notNeeded || options.allowUnchanged, allowEmptyUnitIds: sameTargetIds });
   for (const item of translations || []) {
     const inline = unitDecisions?.get(item.unitId);
