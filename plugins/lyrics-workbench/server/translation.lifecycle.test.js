@@ -2,12 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
+import { languageDecisionCapabilities } from './translation.fixture.js';
 
 // Exercise the package's real completion implementation with bounded public
 // capabilities. Authorization itself is verified in the host lease tests.
 const capabilities = `
 export const createLyricDocument = x => x;
 export const isSingableLineText = x => /[\\p{L}\\p{N}]/u.test(x || '');
+export const isLeadingProviderMetadata = () => false;
 export const computeHash = async () => 'a'.repeat(64);
 export const isNonLyricText = () => false;
 export const analyzeLrcLanguage = () => ({});
@@ -28,7 +30,7 @@ export const createAiGatewayClient = createPluginServiceLease;
 export const getAIAssistantConfig = createPluginServiceLease;
 export const createInvocationDatabase = x => x;
 export const invocationBudget = () => null;
-`;
+` + languageDecisionCapabilities;
 const bundle = await build({ entryPoints: [fileURLToPath(new URL('./translation.js', import.meta.url))], bundle: true, write: false, format: 'esm', platform: 'node',
   plugins: [{ name: 'completion-capabilities', setup(api) {
     api.onResolve({ filter: /^@flaretune\// }, args => ({ path: args.path, namespace: 'capabilities' }));

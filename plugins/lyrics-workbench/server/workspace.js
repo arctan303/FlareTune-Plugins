@@ -20,10 +20,12 @@ import {
   buildReadyLyricArtifact,
   lyricArtifactStoreForEnv,
   projectLyricArtifact,
+  buildLyricTranslationDecision,
+  LYRIC_TRANSLATION_POLICY_VERSION,
 } from "@flaretune/plugin-sdk/server/lyric-workflow";
 import { beginLyricAssetAiCompletion, resolveLegacyLyricCleanup } from "./translation.js";
 import { completeLyricDraft } from "./draftAi.js";
-import { verifyLyricDraftReceipt } from "./draftReceipt.js";
+import { verifyLyricDraftReceiptData } from "./draftReceipt.js";
 import { loadLyricAiConfig, loadLyricAiProcessingSettings } from "./config.js";
 import { lyricSourceLoaderForDb } from "@flaretune/plugin-sdk/server/lyric-source-settings";
 import {
@@ -445,15 +447,33 @@ export async function handleLyricsWorkbenchRoute(request, url, db, headers = {},
       } catch {
         return failure(422, 'INVALID_LYRIC_DOCUMENT', 'Lyric lines are invalid', headers);
       }
-      const inferredLanguage = body.aiReceipt === undefined ? null
-        : await verifyLyricDraftReceipt(env, body.aiReceipt, {
+      const receipt = body.aiReceipt === undefined ? null
+        : await verifyLyricDraftReceiptData(env, body.aiReceipt, {
           songId, accountId: session.account.accountId, etag: body.etag,
           textHash: artifact.textHash, now: now(),
         });
-      if (body.aiReceipt !== undefined && !inferredLanguage) {
+      if (body.aiReceipt !== undefined && !receipt) {
         return failure(400, 'INVALID_LYRIC_DRAFT_RECEIPT', 'Draft AI result is no longer valid', headers);
       }
-      const written = await writeCurrent(store, songId, artifact, current, body.etag);
+      const inferredLanguage = receipt?.language || null;
+      if (receipt) {
+        try {
+          artifact = await buildEditedLyricArtifact({ ...song, language: inferredLanguage }, body.lines, { now: now(), targetLanguage,
+            translationLanguage: body.translationLanguage || storedLyricTranslationLanguage(current.artifact?.translation) || targetLanguage });
+          if (receipt.decision) {
+            if (receipt.decision.policyVersion !== LYRIC_TRANSLATION_POLICY_VERSION) throw new Error('LYRIC_POLICY_CHANGED');
+            // The signed receipt binds the actual draft text/account/version;
+            // rebuild its decision for the final save rather than trusting the client.
+            artifact.translationDecision = buildLyricTranslationDecision(artifact,
+              inferredLanguage && !isExternalLyricSongId(songId) ? { ...song, language: inferredLanguage } : song, {
+              ...receipt.decision, targetLanguage: receipt.decision.targetLanguage,
+            });
+          }
+        } catch {
+          return failure(422, 'INVALID_LYRIC_DOCUMENT', 'Lyric lines are invalid', headers);
+        }
+      }
+      let written = await writeCurrent(store, songId, artifact, current, body.etag);
       if (written.state === 'conflict') return failure(409, 'LYRIC_ASSET_CONFLICT', 'Lyric asset changed', headers);
       let languageUpdateFailed = false;
       if (inferredLanguage && inferredLanguage !== song.language && !isExternalLyricSongId(songId)) {
@@ -467,6 +487,13 @@ export async function handleLyricsWorkbenchRoute(request, url, db, headers = {},
         } catch {
           languageUpdateFailed = true;
         }
+      }
+      if (languageUpdateFailed && written.artifact?.translationDecision) {
+        const { translationDecision: _uncommittedLanguageDecision, ...retryable } = written.artifact;
+        const failedAt = new Date(now()).toISOString();
+        const failed = await store.putIfMatch(songId, { ...retryable,
+          aiCompletion: { status: 'failed', errorCode: 'language_update_failed', updatedAt: failedAt }, updatedAt: failedAt }, written.etag);
+        written = failed.state === 'updated' ? failed : await store.get(songId);
       }
       return success({ ...dataOf({ ...written, state: 'found' }), languageUpdateFailed }, 200, headers);
     }

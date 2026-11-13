@@ -32,7 +32,10 @@ function setup({ initial = null, candidate = document(), config = {}, available 
       settings: async () => settings, assertCurrent: async () => { calls.authority++; }, createDocument: x => structuredClone(x),
       buildArtifact: async (_song, doc) => ({ artifact: asset(doc) }),
       project: value => ({ translation: projectTranslation(value), translationState: value.aiCompletion?.status === 'pending' ? 'pending' : value.aiCompletion?.status === 'failed' ? 'failed' : 'missing' }),
-      shouldTranslate: () => true, preferred: (left, right) => ({ none: 0, line: 1, word: 2 }[left.syncMode] > { none: 0, line: 1, word: 2 }[right.syncMode]), reliable: value => !value.providerMeta?.versionMismatch,
+      resolveTranslationNeed: () => ({ state: 'needed' }),
+      hasNoTranslationDecision: (artifact, _song, { targetLanguage }) => artifact.translationDecision?.status === 'not_needed'
+        && artifact.translationDecision.textHash === artifact.textHash && artifact.translationDecision.targetLanguage === targetLanguage,
+      preferred: (left, right) => ({ none: 0, line: 1, word: 2 }[left.syncMode] > { none: 0, line: 1, word: 2 }[right.syncMode]), reliable: value => !value.providerMeta?.versionMismatch,
       fetchCandidate: async () => { calls.fetch++; if (failure) throw failure; return candidate; },
       aiAvailable: async () => { calls.available++; return available; }, aiConfig: async () => settings,
       translationError: code => ({ code, message: 'Safe translation error' }),
@@ -202,6 +205,33 @@ test('concurrent preparations reuse an identical adopted winner instead of faili
   assert.ok(adopted.every(result => result.document.lines[0].text === 'Hello world'));
   assert.equal((await f.store.get(song.id)).artifact.provenance.managedBy, 'lyrics-workbench');
   assert.equal(f.calls.ai, 0);
+});
+
+for (const completionEnabled of [false, true]) {
+  test('a current no-op decision is returned without acquiring AI or reprocessing: ' + completionEnabled, async () => {
+    const initial = asset(document('manual', 'line', '风吹过窗前'));
+    initial.translationDecision = { status: 'not_needed', textHash: initial.textHash, targetLanguage: 'zh',
+      policyVersion: 1, songLanguage: 'en', sourceLanguage: 'zh', basis: 'ai' };
+    initial.aiCompletion = { status: 'completed', processingKey: 'zh|0|1|1|1|1|1' };
+    const f = setup({ initial, config: { completionEnabled } });
+    const result = await f.source.resolve(song);
+    assert.equal(result.translation.state, 'not_needed'); assert.equal(result.translation.supported, false);
+    await result.onAdopt();
+    await f.source.translate({ songId: song.id, textHash: initial.textHash, sourceRef: result.sourceRef });
+    assert.equal(f.calls.ai, 0); assert.equal(f.calls.available, 0);
+    assert.equal(f.store.calls.put, 0);
+  });
+}
+
+test('a generic completed marker is not treated as proof that unknown lyrics need no translation', async () => {
+  const initial = asset(document('manual'));
+  initial.aiCompletion = { status: 'completed', processingKey: 'zh|0|1|1|1|1|1' };
+  const f = setup({ initial, config: { automaticCompletionEnabled: false } });
+  const result = await f.source.resolve(song);
+  assert.equal(result.translation.state, 'idle');
+  assert.equal(result.translation.supported, true);
+  const started = await f.source.translate({ songId: song.id, textHash: initial.textHash, sourceRef: result.sourceRef });
+  assert.equal(started.translation.state, 'pending'); assert.equal(f.calls.ai, 1);
 });
 
 for (const candidate of [null, document()]) {

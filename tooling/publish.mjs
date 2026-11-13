@@ -110,7 +110,7 @@ export async function createArtifact(id, { root = repositoryRoot } = {}) {
   const manifestPath = resolve(packageRoot, 'manifest.json');
   if ((await lstat(manifestPath)).isSymbolicLink()) fail('PUBLISH_SYMLINK_UNSUPPORTED');
   const manifest = canonical(JSON.parse(await readFile(manifestPath, 'utf8')));
-  if (manifest.id !== id || !versionPattern.test(manifest.version) || ![2, 3].includes(manifest.hostApiVersion)) fail('PUBLISH_MANIFEST_INVALID');
+  if (manifest.id !== id || !versionPattern.test(manifest.version) || ![2, 3, 4].includes(manifest.hostApiVersion)) fail('PUBLISH_MANIFEST_INVALID');
   const sources = await sourcePaths(root, packageRoot);
   const entries = Object.fromEntries(['client', 'server'].filter(kind => sources.includes(`${kind}/index.${kind === 'client' ? 'jsx' : 'js'}`))
     .map(kind => [kind, `${kind}/index.js`]));

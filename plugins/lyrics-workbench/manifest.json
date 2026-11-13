@@ -1,7 +1,7 @@
 {
   "id": "lyrics-workbench",
-  "version": "0.3.2",
-  "hostApiVersion": 3,
+  "version": "0.3.3",
+  "hostApiVersion": 4,
   "apiVersion": 1,
   "dataVersion": 0,
   "name": "歌词工作台",

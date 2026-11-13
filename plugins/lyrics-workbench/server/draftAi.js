@@ -1,4 +1,4 @@
-import { buildEditedLyricArtifact } from "@flaretune/plugin-sdk/server/lyric-workflow";
+import { buildEditedLyricArtifact, projectLyricArtifact } from "@flaretune/plugin-sdk/server/lyric-workflow";
 import { runLyricAssetAiCompletion } from "./translation.js";
 import { createLyricDraftReceipt } from "./draftReceipt.js";
 
@@ -38,9 +38,16 @@ export async function completeLyricDraft({ env, db, song, lines, translationLang
   if (artifact.aiCompletion?.status === 'failed') {
     return { status: 'failed', errorCode: artifact.aiCompletion.errorCode };
   }
-  const translations = artifact.translation?.lines || [];
+  inferredLanguage ||= artifact.translationDecision?.sourceLanguage || null;
+  // Local completion binds its decision to the inferred tag without writing
+  // that tag from a draft. Virtual songs retain their original tag scope.
+  const projectionSong = inferredLanguage && !/^yt:[A-Za-z0-9_-]{11}$/u.test(song.id)
+    ? { ...song, language: inferredLanguage } : song;
+  const projected = projectLyricArtifact(artifact, { song: projectionSong,
+    targetLanguage: artifact.translationDecision?.targetLanguage || null });
+  const translations = projected?.translation?.lines || [];
   const receipt = await createLyricDraftReceipt(env, { songId: song.id, accountId: actorAccountId,
-    etag, language: inferredLanguage, textHash: artifact.textHash, now: now() });
+    etag, language: inferredLanguage, textHash: artifact.textHash, decision: artifact.translationDecision, now: now() });
   return {
     status: 'ready',
     lines: artifact.original.lines.map((line, index) => ({
@@ -48,7 +55,7 @@ export async function completeLyricDraft({ env, db, song, lines, translationLang
       ...(translations[index] ? { tlyric: translations[index] } : {}),
     })),
     inferredLanguage,
-    translationLanguage: artifact.translation?.language || null,
+    translationLanguage: projected?.translation?.language || null,
     receipt,
   };
 }

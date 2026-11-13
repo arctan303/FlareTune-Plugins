@@ -36,13 +36,11 @@ export function createWorkbenchSourceCore({ env, db, session, executionContext, 
     const translation = projected?.translation;
     const valid = translation && translation.originalTextHash === artifact.textHash
       && spokenLanguageMatches(translation.language || (translation.source === 'ai' ? 'zh' : null), config.targetLanguage);
-    const needs = operations.shouldTranslate(artifact.original, song, { targetLanguage: config.targetLanguage });
+    const cachedNoOp = operations.hasNoTranslationDecision(artifact, song, { targetLanguage: config.targetLanguage });
+    const needs = !cachedNoOp && operations.resolveTranslationNeed(artifact.original, song, { targetLanguage: config.targetLanguage }).state !== 'not_needed';
     const available = !valid && config.completionEnabled && needs && await operations.aiAvailable();
-    let state = valid ? 'ready' : projected?.translationState === 'pending' ? 'pending'
-      : projected?.translationState === 'failed' ? 'failed' : !needs ? 'not_needed' : available ? 'idle' : 'unavailable';
-    // Completed no-op language detection remains distinct from a failed task.
-    if (!valid && artifact.aiCompletion?.status === 'completed' && projected?.translationState === 'unavailable'
-      && artifact.aiCompletion.processingKey?.split('|')[0] === config.targetLanguage) state = 'not_needed';
+    const state = valid ? 'ready' : !needs ? 'not_needed' : projected?.translationState === 'pending' ? 'pending'
+      : projected?.translationState === 'failed' ? 'failed' : available ? 'idle' : 'unavailable';
     const supported = Boolean(valid || available && state !== 'not_needed');
     return { quality: grade(document, artifact, config), document, artifact, etag: read.etag,
       translation: { supported, state: supported || state === 'not_needed' ? state : 'unavailable', targetLanguage: config.targetLanguage,
@@ -128,6 +126,7 @@ export function createWorkbenchSourceCore({ env, db, session, executionContext, 
       // while reusing a compatible layer and the saved overall offset.
       built = { ...built, artifact: { ...built.artifact, offsetMs: artifact.offsetMs,
         translation: built.artifact.translation || artifact.translation,
+        ...(artifact.translationDecision ? { translationDecision: artifact.translationDecision } : {}),
         aiCompletion: built.artifact.translation ? null : artifact.aiCompletion } };
     }
     const quality = grade(selected, built.artifact, config);

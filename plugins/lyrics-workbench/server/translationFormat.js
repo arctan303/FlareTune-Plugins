@@ -9,9 +9,10 @@ export {
 import { isTranslationTarget, normalizeTranslationTarget, targetScriptEvidence, isUnchangedTranslation, translationTargetEnglishName } from '../shared/translation-languages.js';
 import { computeHash } from "@flaretune/plugin-sdk/server/lyric-parsing";
 import { isValidSongLanguage } from "@flaretune/plugin-sdk/server/song-language";
+import { resolveLyricTranslationNeed } from "@flaretune/plugin-sdk/server/lyric-workflow";
 
 const LRC_TIMESTAMP_ANY_PATTERN = /\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?\]/;
-const TRANSLATION_PROMPT_VERSION = 'lyrics-target-v6-contextual-polish';
+const TRANSLATION_PROMPT_VERSION = 'lyrics-target-v7-language-decision';
 const DEFAULT_MAX_BATCH_UNITS = 120;
 const DEFAULT_MAX_BATCH_CHARACTERS = 12_000;
 const DEFAULT_CONTEXT_UNITS = 4;
@@ -30,7 +31,7 @@ function createSystemPrompt(targetLanguage = 'en') {
 4. 连贯：跨行语义要参考上下文，每个 text 仍只承载对应原行，不合并或拆分单元。
 目标书写要求：${script}
 
-严格规则：只翻译 units；context、title、artist 仅供理解。referenceTranslations 可能有误，原文始终优先。歌词实际已是目标语言及其目标书写形式时返回 {"notNeeded":true}，不要复制原文冒充译文。拉丁字母不等于英语，也不能仅凭字母猜测西班牙语、法语等；不确定时在同一次分析里保留未知。需要翻译时只返回 {"translations":[{"unitId":0,"text":"译文"}]}，与 units 等长，每个 unitId 恰好出现一次。不得输出时间戳、Markdown、署名、解释或多余段落。名字、口号与拟声可按目标语言语境保留，但不能把整份外语正文原样返回。`;
+严格规则：只翻译 units；context、title、artist 仅供理解。referenceTranslations 可能有误，原文始终优先。全部原文已是目标语言时返回 {"notNeeded":true,"songLanguage":"语言代码"}，繁简转换不算翻译，不能同时返回 translations。每批必须给出实际原文的 songLanguage，未知用 other。混合语言必须增加 unitLanguages:[{"unitId":0,"language":"zh"}]，与本批units全覆盖；已是目标语言的行不改写，译文text返回空字符串，只为真正外语行提供译文。同一行多语时改用{"unitId":0,"languages":["zh","en"],"segments":[{"text":"我轻声说 ","language":"zh"},{"text":"I love you","language":"en","translation":"我爱你"}]}；segments.text按序完整拼回该行原文，同目标段不能有translation，外语段提供translation，该行translations.text只拼接外语段译文，不重复或改写原有中文。language与languages二选一。拉丁字母不等于英语，也不能仅凭字母猜测西班牙语、法语等。不确定不是无需翻译。需要翻译时返回 {"songLanguage":"语言代码","translations":[{"unitId":0,"text":"译文"}]}，与 units 等长，每个 unitId 恰好出现一次。不得输出时间戳、Markdown、署名、解释或多余段落。名字、口号与拟声可按目标语言语境保留，但不能把整份外语正文原样返回。`;
 }
 
 export function buildTranslationPrompt(
@@ -118,7 +119,7 @@ function parseJsonResponse(aiResponse) {
   }
 }
 
-export function parseTranslationResponse(aiResponse, expectedUnits, { targetLanguage = 'zh', allowUnchanged = false } = {}) {
+export function parseTranslationResponse(aiResponse, expectedUnits, { targetLanguage = 'zh', allowUnchanged = false, allowEmptyUnitIds = new Set() } = {}) {
   if (!Array.isArray(expectedUnits) || expectedUnits.length === 0) throw new Error('NO_TRANSLATABLE_LINES');
   let parsedJson = parseJsonResponse(aiResponse);
   if (Array.isArray(parsedJson)) parsedJson = { translations: parsedJson };
@@ -149,7 +150,7 @@ export function parseTranslationResponse(aiResponse, expectedUnits, { targetLang
     const text = item.text.trim();
     const sourceText = expectedById.get(item.unitId).text;
     const maximumLength = Math.max(240, sourceText.length * 8);
-    if (!text || text.length > maximumLength || /[\r\n]/u.test(text)
+    if ((!text && !allowEmptyUnitIds.has(item.unitId)) || text.length > maximumLength || /[\r\n]/u.test(text)
       || LRC_TIMESTAMP_ANY_PATTERN.test(text) || /```/.test(text)) {
       throw new Error('INVALID_TRANSLATION_TEXT');
     }
@@ -157,38 +158,110 @@ export function parseTranslationResponse(aiResponse, expectedUnits, { targetLang
   }
 
   const ordered = expectedUnits.map(unit => translatedById.get(unit.unitId));
-  if (targetScriptEvidence(ordered.join('\n'), targetLanguage) === 'mismatch') throw new Error('TARGET_LANGUAGE_MISMATCH');
+  const translatedBody = ordered.filter(Boolean).join('\n');
+  if (translatedBody && targetScriptEvidence(translatedBody, targetLanguage) === 'mismatch') throw new Error('TARGET_LANGUAGE_MISMATCH');
   if (!allowUnchanged && isUnchangedTranslation(expectedUnits.map(unit => unit.text), ordered)) throw new Error('UNCHANGED_TRANSLATION');
   return [...translatedById].map(([unitId, text]) => ({ unitId, text }));
 }
 
 export function parseLanguageAwareTranslationResponse(aiResponse, expectedUnits, options = {}) {
   const parsed = parseJsonResponse(aiResponse);
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return { translations: parseTranslationResponse(parsed, expectedUnits, options), language: null,
-      discardLineIndices: [] };
-  }
-  const { songLanguage, translationLanguage, discardLineIndices, ...translationResponse } = parsed;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('INVALID_RESPONSE_FIELDS');
+  if (Object.hasOwn(parsed, 'notNeeded') && Object.hasOwn(parsed, 'translations')) throw new Error('INVALID_RESPONSE_FIELDS');
+  const { songLanguage, translationLanguage, discardLineIndices, unitLanguages, ...translationResponse } = parsed;
   if (translationLanguage !== undefined && normalizeTranslationTarget(translationLanguage) !== normalizeTranslationTarget(options.targetLanguage || 'zh')) throw new Error('TARGET_LANGUAGE_MISMATCH');
   const language = isValidSongLanguage(songLanguage) && songLanguage !== 'instrumental'
     && songLanguage !== 'other' ? songLanguage : null;
+  const hint = isValidSongLanguage(options.sourceLanguage) && !['instrumental', 'other'].includes(options.sourceLanguage)
+    ? options.sourceLanguage : null;
+  const effectiveLanguage = language || hint;
   const allowed = options.allowedCleanupIndices;
   const validCandidates = Array.isArray(discardLineIndices) && allowed
     && discardLineIndices.every((index) => Number.isInteger(index) && allowed.has(index));
-  let translations;
-  try { translations = parseTranslationResponse(translationResponse, expectedUnits, options); }
-  catch (error) {
-    const target = normalizeTranslationTarget(options.targetLanguage || 'zh');
-    const sameSpokenLanguage = language === target || language === 'zh' && target === 'zh-Hant';
-    if (error.message !== 'UNCHANGED_TRANSLATION' || !sameSpokenLanguage
-      || targetScriptEvidence(expectedUnits.map(unit => unit.text).join('\n'), target) === 'mismatch') throw error;
-    // Same-request AI language evidence may establish that copied text already
-    // is the target. Return a no-op, never advertise the copy as translation.
-    translations = null;
+  if (options.analysisOnly) {
+    if (translationResponse.notNeeded !== true || Object.keys(translationResponse).length !== 1) throw new Error('INVALID_RESPONSE_FIELDS');
+    return { translations: null, language, sourceLanguage: effectiveLanguage, hasForeignPassages: false,
+      discardLineIndices: validCandidates ? [...new Set(discardLineIndices)].sort((a, b) => a - b) : [] };
   }
-  return { translations, language,
+  const targetLanguage = options.targetLanguage || 'zh';
+  const decisionFor = (units, sourceLanguage) => resolveLyricTranslationNeed({ lines: units.map(unit => ({ text: unit.text })) },
+    { language: sourceLanguage }, { targetLanguage });
+  let unitDecisions = null;
+  if (unitLanguages !== undefined) {
+    if (!Array.isArray(unitLanguages) || unitLanguages.length !== expectedUnits.length) throw new Error('INVALID_UNIT_LANGUAGES');
+    const expected = new Map(expectedUnits.map(unit => [unit.unitId, unit]));
+    const selected = new Map();
+    for (const item of unitLanguages) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)
+        || Object.keys(item).some(key => !['unitId', 'language', 'languages', 'segments'].includes(key))
+        || !Number.isInteger(item.unitId) || !expected.has(item.unitId) || selected.has(item.unitId)
+        || (Object.hasOwn(item, 'language') === Object.hasOwn(item, 'languages'))) throw new Error('INVALID_UNIT_LANGUAGES');
+      if (item.languages !== undefined) {
+        if (!Array.isArray(item.languages) || item.languages.length < 2 || item.languages.length > 15
+          || new Set(item.languages).size !== item.languages.length
+          || item.languages.some(language => !isValidSongLanguage(language) || ['instrumental', 'other'].includes(language))
+          || !Array.isArray(item.segments) || item.segments.length < 2 || item.segments.length > 128) throw new Error('INVALID_UNIT_LANGUAGES');
+        const foreign = [], used = new Set();
+        for (const segment of item.segments) {
+          if (!segment || typeof segment !== 'object' || Array.isArray(segment)
+            || Object.keys(segment).some(key => !['text', 'language', 'translation'].includes(key))
+            || typeof segment.text !== 'string' || !segment.text || !item.languages.includes(segment.language)) throw new Error('INVALID_LANGUAGE_SEGMENTS');
+          used.add(segment.language);
+          const part = decisionFor([{ text: segment.text }], segment.language);
+          if (part.state === 'unknown') throw new Error('SOURCE_LANGUAGE_MISMATCH');
+          if (part.state === 'not_needed') {
+            if (segment.translation !== undefined && segment.translation !== '') throw new Error('TARGET_SEGMENT_REWRITTEN');
+          } else {
+            if (typeof segment.translation !== 'string' || !segment.translation.trim()) throw new Error('INVALID_LANGUAGE_SEGMENTS');
+            foreign.push({ text: segment.text, translation: segment.translation.trim() });
+          }
+        }
+        if (used.size !== item.languages.length || item.segments.map(segment => segment.text).join('') !== expected.get(item.unitId).text) throw new Error('INVALID_LANGUAGE_SEGMENTS');
+        selected.set(item.unitId, { state: foreign.length ? 'needed' : 'not_needed',
+          inlineTranslation: foreign.map(segment => segment.translation).join(' '),
+          foreignSourceText: foreign.map(segment => segment.text).join(' ') });
+        continue;
+      }
+      if (item.segments !== undefined || !isValidSongLanguage(item.language)
+        || ['instrumental', 'other'].includes(item.language)) throw new Error('INVALID_UNIT_LANGUAGES');
+      const decision = decisionFor([expected.get(item.unitId)], item.language);
+      if (decision.state === 'unknown') throw new Error('SOURCE_LANGUAGE_MISMATCH');
+      selected.set(item.unitId, decision);
+    }
+    unitDecisions = selected;
+  }
+  const decision = unitDecisions ? null : effectiveLanguage ? decisionFor(expectedUnits, effectiveLanguage) : null;
+  const notNeeded = unitDecisions ? [...unitDecisions.values()].every(item => item.state === 'not_needed')
+    : decision?.state === 'not_needed';
+  const hasForeignPassages = unitDecisions ? [...unitDecisions.values()].some(item => item.state === 'needed') : decision?.state === 'needed';
+  if (!effectiveLanguage) throw new Error('LANGUAGE_UNDETERMINED');
+  if (!unitDecisions && decision.state === 'unknown') throw new Error('SOURCE_LANGUAGE_MISMATCH');
+  if (translationResponse.notNeeded === true) {
+    if (!notNeeded || Object.keys(translationResponse).length !== 1) throw new Error('INVALID_NOT_NEEDED');
+    return { translations: null, language: language || effectiveLanguage,
+      sourceLanguage: effectiveLanguage, hasForeignPassages: false,
+      discardLineIndices: validCandidates ? [...new Set(discardLineIndices)].sort((a, b) => a - b) : [] };
+  }
+  const sameTargetIds = new Set(unitDecisions ? [...unitDecisions].filter(([, item]) => item.state === 'not_needed').map(([unitId]) => unitId) : []);
+  const translations = parseTranslationResponse(translationResponse, expectedUnits,
+    { ...options, allowUnchanged: notNeeded || options.allowUnchanged, allowEmptyUnitIds: sameTargetIds });
+  for (const item of translations || []) {
+    const inline = unitDecisions?.get(item.unitId);
+    if (inline?.inlineTranslation !== undefined && item.text !== inline.inlineTranslation) throw new Error('TARGET_SEGMENT_REWRITTEN');
+  }
+  // Reliable same-target language evidence canonicalizes a rewrite/copy to a
+  // no-op. Mixed results blank target-language rows before any asset write.
+  const selected = notNeeded ? null : translations.map(item => sameTargetIds.has(item.unitId) ? { ...item, text: '' } : item);
+  if (selected && selected.every(item => !item.text.trim())) throw new Error('UNCHANGED_TRANSLATION');
+  if (selected) {
+    const body = selected.filter(item => item.text.trim()).map(item => item.text).join('\n');
+    if (targetScriptEvidence(body, targetLanguage) === 'mismatch') throw new Error('TARGET_LANGUAGE_MISMATCH');
+    const sourceById = new Map(expectedUnits.map(unit => [unit.unitId, unitDecisions?.get(unit.unitId)?.foreignSourceText ?? unit.text]));
+    if (selected.filter(item => item.text.trim()).every(item => isUnchangedTranslation([sourceById.get(item.unitId)], [item.text]))) throw new Error('UNCHANGED_TRANSLATION');
+  }
+  return { translations: selected, language,
+    sourceLanguage: effectiveLanguage, hasForeignPassages,
     discardLineIndices: validCandidates ? [...new Set(discardLineIndices)].sort((a, b) => a - b) : [] };
-
 }
 
 export function reconstructTranslatedLrc(aiResponse, parsedLines) {

@@ -1,5 +1,6 @@
 import { createLyricDocument } from '@flaretune/plugin-sdk/server/lyric-document';
-import { lyricArtifactStoreForEnv, buildReadyLyricArtifact, projectLyricArtifact, shouldAiCompleteLyrics } from '@flaretune/plugin-sdk/server/lyric-workflow';
+import { lyricArtifactStoreForEnv, buildReadyLyricArtifact, projectLyricArtifact,
+  resolveLyricTranslationNeed, hasCurrentLyricNoTranslationDecision } from '@flaretune/plugin-sdk/server/lyric-workflow';
 import { preferredAutomaticDocument, reliableAutomaticMatch } from '@flaretune/plugin-sdk/server/lyric-resolution';
 import { fetchLyricsDocumentWithFallback } from '@flaretune/plugin-sdk/server/lyric-sources';
 import { computeHash } from '@flaretune/plugin-sdk/server/lyric-parsing';
@@ -59,7 +60,8 @@ export function createLyricSource({ env, db = env?.DB, session, executionContext
       createDocument: dependencies.createDocument || createLyricDocument,
       buildArtifact: dependencies.buildArtifact || buildReadyLyricArtifact,
       project: dependencies.project || projectLyricArtifact,
-      shouldTranslate: dependencies.shouldTranslate || shouldAiCompleteLyrics,
+      resolveTranslationNeed: dependencies.resolveTranslationNeed || resolveLyricTranslationNeed,
+      hasNoTranslationDecision: dependencies.hasNoTranslationDecision || hasCurrentLyricNoTranslationDecision,
       preferred: dependencies.preferred || preferredAutomaticDocument,
       reliable: dependencies.reliable || reliableAutomaticMatch,
       fetchCandidate: dependencies.fetchCandidate || (async (song, options) => {

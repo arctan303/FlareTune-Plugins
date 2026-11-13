@@ -20,15 +20,17 @@ async function signingKey(env) {
 }
 
 export async function createLyricDraftReceipt(env, { songId, accountId, etag, language, textHash,
-  now = Date.now() }) {
+  decision, now = Date.now() }) {
   if (!language) return null;
   const payload = encoder.encode(JSON.stringify({ v: 1, songId, accountId, etag,
-    language, textHash, expiresAt: now + RECEIPT_TTL_MS }));
+    language, textHash, ...(decision ? { decision: { status: decision.status, targetLanguage: decision.targetLanguage,
+      sourceLanguage: decision.sourceLanguage, basis: decision.basis, policyVersion: decision.policyVersion,
+      ...(decision.hasForeignPassages ? { hasForeignPassages: true } : {}) } } : {}), expiresAt: now + RECEIPT_TTL_MS }));
   const signature = await crypto.subtle.sign('HMAC', await signingKey(env), payload);
   return `${encode(payload)}.${encode(new Uint8Array(signature))}`;
 }
 
-export async function verifyLyricDraftReceipt(env, token, { songId, accountId, etag, textHash,
+export async function verifyLyricDraftReceiptData(env, token, { songId, accountId, etag, textHash,
   now = Date.now() }) {
   if (typeof token !== 'string' || token.length > 4096
     || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u.test(token)) return null;
@@ -46,8 +48,12 @@ export async function verifyLyricDraftReceipt(env, token, { songId, accountId, e
       || !LANGUAGES.has(result.language)) {
       return null;
     }
-    return result.language;
+    return { language: result.language, ...(result.decision ? { decision: result.decision } : {}) };
   } catch {
     return null;
   }
+}
+
+export async function verifyLyricDraftReceipt(env, token, options) {
+  return (await verifyLyricDraftReceiptData(env, token, options))?.language || null;
 }

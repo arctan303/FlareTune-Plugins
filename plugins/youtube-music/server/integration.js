@@ -155,11 +155,15 @@ export async function handleYouTubeMusicRoute(request, url, env, session, ctx, o
       }
       const result = await access.service.search(url.searchParams.get('q').trim(), {
         filter: field === 'songs' ? 'song' : field === 'artists' ? 'artist' : 'album', hl: languageOf(url), ...page });
-      await access.assertCurrent();
       remote = (result[field] || []).slice(page.offset, page.offset + page.limit);
       remoteHasMore = Boolean(result.hasMore);
+      if (field === 'songs' && typeof access.service.projectSearchDisplayTitles === 'function') {
+        remote = await access.service.projectSearchDisplayTitles(remote, { signal: request.signal });
+      }
+      await access.assertCurrent();
     } catch (error) {
       if (inactiveCodes.has(codeOf(error))) return json(payload);
+      remote = []; remoteHasMore = false;
       warning = { source: 'youtube', code: /429|RATE|rate/u.test(codeOf(error)) ? 'rate_limited' : 'unavailable',
         ...(error instanceof YouTubeError ? { reason: error.code } : {}) };
     }

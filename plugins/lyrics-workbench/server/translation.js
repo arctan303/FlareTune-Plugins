@@ -1,22 +1,24 @@
 import { createLyricsAiAccess, createLyricsAiLease, guardLyricsStore } from "./aiAccess.js";
 import { lyricAiProcessingKey } from "./policy.js";
 import { reserveDailyQuota } from "./usage.js";
-import { buildTranslationBatches, parseLanguageAwareTranslationResponse, parseTranslationResponse } from "./translationFormat.js";
-import { createLyricDocument, isSingableLineText } from "@flaretune/plugin-sdk/server/lyric-document";
+import { buildTranslationBatches, parseLanguageAwareTranslationResponse } from "./translationFormat.js";
+import { createLyricDocument, isSingableLineText, isLeadingProviderMetadata } from "@flaretune/plugin-sdk/server/lyric-document";
 import { computeHash, isNonLyricText } from "@flaretune/plugin-sdk/server/lyric-parsing";
 import {
   isFreshLyricAiPending,
   projectLyricArtifact,
   lyricTextForHash,
-  shouldAiCompleteLyrics,
+  resolveLyricTranslationNeed,
+  hasCurrentLyricNoTranslationDecision,
+  buildLyricNoTranslationDecision,
+  buildLyricTranslationDecision,
 } from "@flaretune/plugin-sdk/server/lyric-workflow";
 
 const DEFAULT_DAILY_LIMIT = 50;
 const AI_COMPLETION_DEADLINE_MS = 24_000;
 // ai.js treats shorter overrides as invalid, so stop before it could fall back to 90 seconds.
 const MIN_AI_REQUEST_BUDGET_MS = 5_000;
-const mixedBatchInstruction = (targetLanguage) => `整首歌的其他批次已确认需要 ${targetLanguage} 译文。为保持逐行译文完整，本批不得返回 notNeeded；请为每个 unitId 返回一项 translations。已经是目标语言的歌词可原样保留。`;
-const LANGUAGE_INSTRUCTION = `同时根据 languageSample 中真正演唱的歌词判断这首歌最主要的语言，不要根据歌名、歌手名或署名判断。请在原本的 JSON 对象中增加 songLanguage 字段，值只能是 zh、ja、en、ko、ru、es、fr、de、sv、vi、yue、it、th、pt 或 other。多语言时选歌词中占主导的语言；无法可靠判断时使用 other。即使返回 notNeeded，也必须提供 songLanguage。目标译文语言与歌曲语种是两个概念；若返回 translationLanguage，须标识实际译文目标（可为 zh-Hant），但 songLanguage 仍只用上述歌曲语种枚举，不能用 zh-Hant。拉丁字母不能直接判定为英语，证据不足时返回 other。`;
+const LANGUAGE_INSTRUCTION = `同时根据本批 units 和 languageSample 中真正演唱的歌词判断原文语言，不要根据歌名、歌手名或署名判断。每批都必须返回 songLanguage 字段，值只能是 zh、ja、en、ko、ru、es、fr、de、sv、vi、yue、it、th、pt 或 other。多语言时选占主导语言，并返回覆盖本批全部unitId的 unitLanguages:[{"unitId":0,"language":"zh"}]；同目标语言行译文留空，不能改写。同一行多语用languages数组及完整覆盖原文的segments，每段声明text/language，仅外语段可带translation，translations.text只拼接外语段译文。无法可靠判断时使用other，不能返回notNeeded。notNeeded:true仅表示本批全部正文无需翻译，不能与translations同时存在。即使返回notNeeded也必须提供songLanguage。繁简中文转换不算翻译。目标译文语言与歌曲语种是两个概念；若返回 translationLanguage，须标识实际译文目标（可为 zh-Hant），但 songLanguage 仍只用上述歌曲语种枚举，不能用 zh-Hant。拉丁字母不能直接判定为英语，证据不足时返回 other。`;
 const CLEANUP_INSTRUCTION = `歌曲 title 和 artist 仅用于识别上下文，不能写进歌词。检查 cleanupUnits 中不属于实际演唱的整行内容，例如开头的歌名歌手资料、Lyrics by / Composed by 等制作署名、广告、乱码和无效正文。只把确定应整行删除的 index 放入 discardLineIndices；标题若也是实际唱出的歌词，应保留演唱位置的那一行。拿不准时保留。不得改写任何原文、增添歌词行、修改行时间戳或逐字时间点。若同时返回 translations，仍须与 units 一一对应；服务端会丢弃被标记整行及其译文。即使返回 notNeeded，也必须提供 discardLineIndices。`;
 
 export function getDailyLyricCompletionLimit(env) {
@@ -38,7 +40,9 @@ const safeErrorCode = (error) => {
   if (/AI_UPSTREAM_5\d\d/u.test(message)) return 'upstream_unavailable';
   if (message.includes('AI_ASSISTANT_CONFIG') || message.includes('AI_CONFIG_INVALID')) return 'configuration_unavailable';
   if (message.includes('AI_EMPTY_RESPONSE') || message.includes('NO_TRANSLATABLE_LINES')
-    || message === 'INVALID_JSON') return 'invalid_output';
+    || message === 'INVALID_JSON' || message.startsWith('INVALID_') || message === 'LANGUAGE_UNDETERMINED'
+    || message === 'SOURCE_LANGUAGE_MISMATCH' || message === 'TARGET_LANGUAGE_MISMATCH'
+    || message === 'UNCHANGED_TRANSLATION') return 'invalid_output';
   return 'completion_failed';
 };
 
@@ -70,9 +74,13 @@ function completionDeadline(deps, execute) {
     .finally(() => clearTimeout(timer));
 }
 
-function completionUnits(original) {
+function completionUnits(original, song) {
+  const songTextKey = text => String(text || '').normalize('NFKC').toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+  const titleKey = songTextKey(song?.title);
   return original.lines
-    .map((line, index) => ({ unitId: index, index, text: String(line.text || '').trim(), repeatCount: 1 }))
+    .flatMap((line, index) => isLeadingProviderMetadata(line, index, song)
+      && !(titleKey && songTextKey(line.text) === titleKey) ? []
+      : [{ unitId: index, index, text: String(line.text || '').trim(), repeatCount: 1 }])
     .filter((unit) => isSingableLineText(unit.text));
 }
 
@@ -119,7 +127,11 @@ async function updateInferredSongLanguage(db, song, language, deps) {
   const update = deps.updateSongLanguage || (async (songId, inferred, previous) => db.prepare(
     'UPDATE Songs SET language = ? WHERE id = ? AND language IS ?',
   ).bind(inferred, songId, previous).run());
-  await update(song.id, language, song.language ?? null);
+  const result = await update(song.id, language, song.language ?? null);
+  if (result?.meta?.changes === 0 || result?.changes === 0) {
+    const current = await db.prepare('SELECT language FROM Songs WHERE id = ?').bind(song.id).first();
+    if (current?.language !== language) throw new Error('SONG_LANGUAGE_CHANGED');
+  }
 }
 
 async function finishWithInferredLanguage(store, db, song, finished, language, deps) {
@@ -129,8 +141,9 @@ async function finishWithInferredLanguage(store, db, song, finished, language, d
     return finished;
   } catch {
     const failedAt = new Date((deps.now || Date.now)()).toISOString();
+    const { translationDecision: _uncommittedLanguageDecision, ...retryable } = finished.artifact;
     const failed = await store.putIfMatch(song.id, {
-      ...finished.artifact,
+      ...retryable,
       aiCompletion: { status: 'failed', errorCode: 'language_update_failed', updatedAt: failedAt },
       updatedAt: failedAt,
     }, finished.etag, { automation: finished.automation });
@@ -171,7 +184,9 @@ async function applySuggestedCleanup(artifact, indices, updatedAt, song, process
   const translation = translated?.some((line) => String(line || '').trim())
     ? { ...artifact.translation, originalTextHash: textHash, lines: translated, updatedAt }
     : null;
-  return { ...finished, original, textHash, translation };
+  const result = { ...finished, original, textHash, translation };
+  if (textHash !== artifact.textHash) delete result.translationDecision;
+  return result;
 }
 
 export async function resolveLegacyLyricCleanup(store, song, read, now = Date.now) {
@@ -225,27 +240,35 @@ export async function runLyricAssetAiCompletion({
         || artifact.aiCompletion?.status !== 'pending'
         || artifact.aiCompletion.updatedAt !== startedAt) return { state: 'superseded' };
 
-      if (!force && !shouldAiCompleteLyrics(artifact.original, song, { targetLanguage: access.config.targetLanguage || 'en' })) {
-        return conditionallyFinish(store, song.id, startedAt, textHash, (current) => ({
-          ...current,
-          aiCompletion: null,
-          updatedAt: new Date((deps.now || Date.now)()).toISOString(),
-        }));
-      }
-
-      const units = completionUnits(artifact.original);
-      if (units.length === 0) throw new Error('NO_TRANSLATABLE_LINES');
-      deadline.assertRemaining();
       const assistantConfig = access.config;
-      deadline.assertRemaining();
       if (assistantConfig.completionEnabled === false
         || [assistantConfig.cleanDirtyLyrics, assistantConfig.translateLyrics,
-          assistantConfig.detectLanguage].every((enabled) => enabled === false)) {
-        return conditionallyFinish(store, song.id, startedAt, textHash, (current) => ({
+          assistantConfig.detectLanguage].every(enabled => enabled === false)) {
+        return conditionallyFinish(store, song.id, startedAt, textHash, current => ({
           ...current, aiCompletion: null,
           updatedAt: new Date((deps.now || Date.now)()).toISOString(),
         }));
       }
+
+      const target = access.config.targetLanguage || 'en';
+      const initialNeed = resolveLyricTranslationNeed(artifact.original, song, { targetLanguage: target });
+      if (access.config.translateLyrics !== false && (hasCurrentLyricNoTranslationDecision(artifact, song, { targetLanguage: target })
+        || initialNeed.state === 'not_needed')) {
+        return conditionallyFinish(store, song.id, startedAt, textHash, current => ({ ...current,
+          translationDecision: hasCurrentLyricNoTranslationDecision(current, song, { targetLanguage: target }) ? current.translationDecision
+            : buildLyricNoTranslationDecision(current, song, { targetLanguage: target, sourceLanguage: initialNeed.sourceLanguage,
+              basis: initialNeed.sourceLanguage ? 'tag' : 'rules' }),
+          aiCompletion: { status: 'completed', processingKey: lyricAiProcessingKey(access.config), updatedAt: new Date((deps.now || Date.now)()).toISOString() },
+          updatedAt: new Date((deps.now || Date.now)()).toISOString(),
+        }));
+      }
+
+      const units = completionUnits(artifact.original, song);
+      if (units.length === 0) throw new Error('NO_TRANSLATABLE_LINES');
+      // A sung title still needs its translated row. The separate language
+      // sample keeps the provider-metadata exclusions to avoid biasing inference.
+      const languageUnits = units.filter(unit => !isLeadingProviderMetadata(artifact.original.lines[unit.index], unit.index, song));
+      deadline.assertRemaining();
       const now = (deps.now || Date.now)();
       const quotaReserved = await (deps.reserveDailyQuota || reserveDailyQuota)(
         db,
@@ -260,7 +283,7 @@ export async function runLyricAssetAiCompletion({
         && artifact.translation?.language === targetLanguage
         ? new Map(artifact.translation.lines.map((text, unitId) => [unitId, text]))
         : null;
-      const detectLanguage = assistantConfig.detectLanguage !== false;
+      const detectLanguage = assistantConfig.translateLyrics !== false || assistantConfig.detectLanguage !== false;
       const cleanDirtyLyrics = assistantConfig.cleanDirtyLyrics === true;
       const translateLyrics = assistantConfig.translateLyrics !== false;
       const selectedCleanupUnits = cleanDirtyLyrics ? cleanupUnits(artifact.original) : [];
@@ -271,12 +294,14 @@ export async function runLyricAssetAiCompletion({
       const translatedByIndex = new Map();
       const notNeededBatches = [];
       let inferredLanguage = null;
+      let validationLanguage = initialNeed.sourceLanguage;
+      let hasForeignPassages = false;
+      const decisionSong = () => inferredLanguage && !/^yt:[A-Za-z0-9_-]{11}$/u.test(song.id)
+        ? { ...song, language: inferredLanguage } : song;
       let retriedInvalidJson = false;
-      const askForBatch = async (batch, requireComplete = false, firstAnalysis = false,
-        analysisOnly = false) => {
-        let messages = firstAnalysis
-          ? withAnalysisRequest(batch.messages, units, artifact.original, { detectLanguage, cleanDirtyLyrics })
-          : batch.messages;
+      const askForBatch = async (batch, firstAnalysis = false, analysisOnly = false) => {
+        let messages = withAnalysisRequest(batch.messages, languageUnits, artifact.original,
+          { detectLanguage, cleanDirtyLyrics: firstAnalysis && cleanDirtyLyrics });
         if (analysisOnly) messages = [
           { role: 'system', content: [
             '你在分析歌曲歌词。只返回 JSON 对象 {"notNeeded":true,"songLanguage":"语言代码","discardLineIndices":[行号]}。不得输出译文。',
@@ -284,15 +309,14 @@ export async function runLyricAssetAiCompletion({
             cleanDirtyLyrics ? CLEANUP_INSTRUCTION : '',
           ].filter(Boolean).join('\n\n') },
           { role: 'user', content: JSON.stringify({ title: song.title, artist: song.artist,
-            ...(detectLanguage ? { languageSample: languageSample(units) } : {}),
+            ...(detectLanguage ? { languageSample: languageSample(languageUnits) } : {}),
             ...(cleanDirtyLyrics ? { cleanupUnits: selectedCleanupUnits } : {}),
           }) },
         ];
-        if ((assistantConfig.systemPrompt || requireComplete) && messages[0]?.role === 'system') {
+        if (assistantConfig.systemPrompt && messages[0]?.role === 'system') {
           const systemPrompt = [
             assistantConfig.systemPrompt,
             messages[0].content,
-            requireComplete ? mixedBatchInstruction(targetLanguage) : '',
           ].filter(Boolean).join('\n\n');
           messages = [
             { role: 'system', content: systemPrompt },
@@ -303,14 +327,13 @@ export async function runLyricAssetAiCompletion({
           ? { ...assistantConfig, enableThinking: false }
           : assistantConfig;
         const parseResponse = (response) => {
-          if (firstAnalysis) {
-            const parsed = parseLanguageAwareTranslationResponse(response, batch.units,
-              { targetLanguage, allowedCleanupIndices, allowUnchanged: requireComplete });
-            inferredLanguage = detectLanguage ? parsed.language : null;
-            parsed.discardLineIndices.forEach((index) => suggestedCleanup.add(index));
-            return parsed.translations;
-          }
-          return parseTranslationResponse(response, batch.units, { targetLanguage, allowUnchanged: requireComplete });
+          const parsed = parseLanguageAwareTranslationResponse(response, batch.units,
+            { targetLanguage, allowedCleanupIndices, sourceLanguage: validationLanguage, analysisOnly });
+          if (detectLanguage && parsed.language && !inferredLanguage) inferredLanguage = parsed.language;
+          if (parsed.sourceLanguage && (!validationLanguage || firstAnalysis)) validationLanguage = parsed.sourceLanguage;
+          hasForeignPassages ||= parsed.hasForeignPassages === true;
+          if (firstAnalysis) parsed.discardLineIndices.forEach((index) => suggestedCleanup.add(index));
+          return parsed.translations;
         };
         const request = async (requestMessages) => {
           const remainingMs = deadline.remainingMs();
@@ -346,11 +369,11 @@ export async function runLyricAssetAiCompletion({
         { targetLanguage, referenceByUnitId, ...(compactJsonBatches ? { maxUnits: 20 } : {}) });
       if (!translateLyrics) {
         if (detectLanguage || cleanDirtyLyrics) {
-          await askForBatch(batches[0], false, true, true);
+          await askForBatch(batches[0], true, true);
         }
       } else {
         for (const [index, batch] of batches.entries()) {
-          const parsed = await askForBatch(batch, false, index === 0 && (detectLanguage || cleanDirtyLyrics));
+          const parsed = await askForBatch(batch, index === 0 && (detectLanguage || cleanDirtyLyrics));
           if (parsed === null) {
             notNeededBatches.push(batch);
             continue;
@@ -365,30 +388,43 @@ export async function runLyricAssetAiCompletion({
         access.budget?.settle();
         const completedAt = new Date((deps.now || Date.now)()).toISOString();
         const finished = await conditionallyFinish(store, song.id, startedAt, textHash,
-          (current) => applySuggestedCleanup(current, cleanupIndices, completedAt, song,
-            lyricAiProcessingKey(assistantConfig)));
+          async current => {
+            const next = await applySuggestedCleanup(current, cleanupIndices, completedAt, song, lyricAiProcessingKey(assistantConfig));
+            if (translateLyrics) next.translationDecision = buildLyricNoTranslationDecision(next, decisionSong(),
+              { targetLanguage, sourceLanguage: validationLanguage || inferredLanguage, basis: 'ai' });
+            return next;
+          });
         return finishWithInferredLanguage(store, db, song, finished, inferredLanguage, deps);
       }
       for (const batch of notNeededBatches) {
-        const parsed = await askForBatch(batch, true);
-        if (parsed === null) throw new Error('AI_EMPTY_RESPONSE');
-        parsed.forEach(({ unitId, text }) => translatedByIndex.set(unitId, text));
+        // A same-target batch stays empty even when another batch is foreign.
+        // Reissuing it with forced translations would create a same-language rewrite.
+        batch.units.forEach(({ unitId }) => translatedByIndex.set(unitId, ''));
       }
       if (translatedByIndex.size !== units.length) throw new Error('INVALID_COVERAGE');
       access.budget?.settle();
 
       const completedAt = new Date((deps.now || Date.now)()).toISOString();
       const lines = artifact.original.lines.map((_line, index) => translatedByIndex.get(index) || '');
-      const finished = await conditionallyFinish(store, song.id, startedAt, textHash, (current) => applySuggestedCleanup({
-        ...current, translation: {
+      const finished = await conditionallyFinish(store, song.id, startedAt, textHash, async current => {
+        const next = await applySuggestedCleanup({
+          ...current, translation: {
           source: 'ai',
           kind: 'ai',
           originalTextHash: textHash,
           lines,
           language: targetLanguage,
           updatedAt: completedAt,
-        },
-      }, cleanupIndices, completedAt, song));
+          },
+        }, cleanupIndices, completedAt, song);
+        next.translationDecision = buildLyricTranslationDecision(next, decisionSong(),
+          { status: 'translated', targetLanguage, sourceLanguage: validationLanguage || inferredLanguage,
+            basis: 'ai', hasForeignPassages });
+        // Validate the actual kept rows again at the storage boundary. The
+        // completed decision supplies language evidence for virtual/unknown songs.
+        if (!projectLyricArtifact(next, { song: decisionSong(), targetLanguage })?.translation) throw new Error('INVALID_TRANSLATION_OUTPUT');
+        return next;
+      });
       return finishWithInferredLanguage(store, db, song, finished, inferredLanguage, deps);
     });
   } catch (error) {
@@ -429,7 +465,9 @@ export async function beginLyricAssetAiCompletion({
     const resolved = await resolveLegacyLyricCleanup(store, song, current, deps.now || Date.now);
     return { state: 'already_cleaned', artifact: resolved.artifact, etag: resolved.etag, task: null };
   }
-  if (!force && !shouldAiCompleteLyrics(current.artifact.original, song, { targetLanguage: targetLanguage || access.config.targetLanguage || 'zh' })) {
+  const effectiveTarget = targetLanguage || access.config.targetLanguage || 'en';
+  if (access.config.translateLyrics !== false && (hasCurrentLyricNoTranslationDecision(current.artifact, song, { targetLanguage: effectiveTarget })
+    || resolveLyricTranslationNeed(current.artifact.original, song, { targetLanguage: effectiveTarget }).state === 'not_needed')) {
     return { state: 'not_needed', artifact: current.artifact, etag: current.etag, task: null };
   }
   const now = (deps.now || Date.now)();
