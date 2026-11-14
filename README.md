@@ -17,7 +17,7 @@
 
 - 稳定源固定为 `https://raw.githubusercontent.com/arctan303/FlareTune-Plugins/main/repository.json`。保留已发布的旧版条目，供宿主按最低 API 和依赖选择；新版加入目录不强制更新已安装插件。
 - 开发源固定为 `https://raw.githubusercontent.com/arctan303/FlareTune-Plugins/dev/catalogs/development.json`，用于已验证的增强宿主和测试组合。它与稳定源分开，不通过临时分支名分发。
-- `main` 的当前源码组合为 Gateway 0.2.1、Assistant 0.2.0、Lyrics Workbench 1.0.0、Roam 0.1.1、Xiaomi Speaker 1.1.1、YouTube Music 0.2.4；工作台 1.0.0 最低宿主能力兼容编号 5，YT 0.2.4 最低宿主 API 4，旧版 API 2／3 条目继续保留，不强制升级现有站点。
+- `main` 的当前源码组合为 Gateway 0.2.1、Assistant 0.2.0、Lyrics Workbench 1.0.0、Roam 0.1.1、Xiaomi Speaker 1.1.1、YouTube Music 0.2.5；工作台 1.0.0 最低宿主能力兼容编号 5，YT 0.2.5 最低宿主 API 4，旧版 API 2／3 条目继续保留，不强制升级现有站点。
 - YT 0.2.4 已包含增强来源链、原生译文和搜索原名展示，要求 API 4 宿主。工作台 0.3.x 仍按开发目录发布；历史增强 API 3 包依赖额外的歌词接口，不能仅凭相同 API 数字认定兼容。
 
 ### 歌词工作台 1.0.0 / Lyrics workspace 1.0.0
@@ -29,6 +29,12 @@
 **First stable release.** One AI switch and one model configuration serve two roles: predominant-language tagging for untagged songs, then translation when needed. Usable provider translations are reused without AI. A few foreign phrases do not trigger translation when the predominant language already matches the target, such as a mainly Chinese song with Chinese as the target. Original lyrics return before background translation completes; later requests reuse the same task, and failures keep the original available for retry. Consumer clients keep their existing API behavior.
 
 **Host capability level 5 is required.** The new cached “translation needed” state cannot be read by level-4 hosts. This requirement is independent of plugin version 1.0.0 and the FlareTune application version. Enabled legacy manual-only AI becomes automatic preparation on demand; explicitly disabled AI or legacy translation remains disabled. Review the switch before upgrading. This plugin release does not publish FlareTune 1.3.0 or upgrade site hosts. See the [bilingual release notes](release-notes/lyrics-workbench-1.0.0.md) for configuration preservation and recovery.
+
+### YouTube Music 0.2.5
+
+修复 YT 歌词链路反复读取授权及连接状态造成的数据库调用预算耗尽；每次读写仍实时验证会话、安装与连接有效性。沿用歌词工作台 1.0.0、宿主 API 4 和既有连接配置，无需修改客户端。详见[中英发布说明](release-notes/youtube-music-0.2.5.md)。
+
+Fixes repeated authorization and connection reads exhausting the database-call budget in the YT lyrics pipeline. Every I/O still checks live session, installation and connection validity. Client behavior, existing connections and the minimum host API level 4 remain unchanged. See the [bilingual release notes](release-notes/youtube-music-0.2.5.md).
 
 ### YouTube Music 0.2.4
 
