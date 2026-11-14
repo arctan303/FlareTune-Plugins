@@ -79,6 +79,24 @@ test('an offline empty workbench does not claim or search a song', async () => {
   assert.equal(f.calls.fetch, 0); assert.equal(f.calls.ai, 0);
 });
 
+test('offline claim and resolve share one request-owned original read', async () => {
+  const f = setup({ initial: asset(document('manual', 'line')), config: { onlineEnabled: false, completionEnabled: false } });
+  assert.equal(await f.source.claim(song), true);
+  const result = await f.source.resolve(song);
+  assert.equal(result.document.lines[0].text, 'Hello world');
+  assert.equal(f.store.calls.get, 1);
+});
+
+test('an unchanged existing original is returned without an assessment-only rewrite', async () => {
+  const initial = asset(document('youtube', 'none'), { provenance: { managedBy: 'youtube-music', evaluation: 'unassessed', quality: 'weak' } });
+  const f = setup({ initial, candidate: null, config: { completionEnabled: false } });
+  const result = await f.source.resolve(song);
+  const adopted = await result.onAdopt();
+  assert.equal(adopted.quality, 'weak');
+  assert.equal(f.store.calls.put, 0);
+  assert.deepEqual((await f.store.get(song.id)).artifact, initial);
+});
+
 test('a weak workbench result has no storage or AI side effects before adoption', async () => {
   const f = setup({ candidate: document('lrclib', 'line') }); const result = await f.source.resolve(song);
   assert.equal(result.quality, 'weak'); assert.equal(result.translation.supported, true);
