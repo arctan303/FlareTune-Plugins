@@ -77,7 +77,7 @@ test('development catalog preserves every previous entry and its explicitly adde
   }
   for(const identity of baseline.developmentAdditions) {
     assert.equal(catalog.plugins.find(row=>key(row)===identity).manifest.hostApiVersion,
-      ['lyrics-workbench@0.9.0','lyrics-workbench@0.9.1','lyrics-workbench@1.0.0'].includes(identity) ? 5 : 4);
+      ['lyrics-workbench@0.9.0','lyrics-workbench@0.9.1','lyrics-workbench@1.0.0','lyrics-workbench@1.0.1'].includes(identity) ? 5 : 4);
   }
   assert.ok(catalog.plugins.some(row=>key(row)==='lyrics-workbench@0.3.1'));
   assert.ok(catalog.plugins.some(row=>key(row)==='youtube-music@0.2.1'));
