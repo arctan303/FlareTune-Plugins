@@ -16,8 +16,10 @@ const MISS_TTL_MS = 10 * 60 * 1000;
 // The adapter injects the existing host matching, storage and AI capabilities.
 // Selection stays pure until the outer chain actually adopts this source.
 export function createWorkbenchSourceCore({ env, db, session, executionContext, context, store, operations, dependencies = {} }) {
+  const claimedReads = new Map(), checkedFiles = new Map();
   const settings = async () => ({ ...DEFAULT_SETTINGS, ...await operations.settings() });
   const current = async song => { await operations.assertReadScope?.(); return store.get(song.id); };
+  const beginRead = () => (operations.beginRead || operations.assertCurrent)();
   const documentFor = (artifact, song) => {
     const matched = Number(artifact.provenance?.matchedDuration), duration = Number(song.duration);
     return operations.createDocument({ ...artifact.original, providerMeta: { ...artifact.provenance,
@@ -34,8 +36,10 @@ export function createWorkbenchSourceCore({ env, db, session, executionContext, 
     const projected = operations.project(artifact, { song, targetLanguage: config.targetLanguage });
     // Projection hides invalid legacy layers without mutating their saved bytes.
     const translation = projected?.translation;
+    const translationLanguage = operations.translationLanguage ? operations.translationLanguage(translation)
+      : translation?.language || (translation?.source === 'ai' ? 'zh' : null);
     const valid = translation && translation.originalTextHash === artifact.textHash
-      && spokenLanguageMatches(translation.language || (translation.source === 'ai' ? 'zh' : null), config.targetLanguage);
+      && spokenLanguageMatches(translationLanguage, config.targetLanguage);
     const cachedNoOp = operations.hasNoTranslationDecision(artifact, song, { targetLanguage: config.targetLanguage });
     const needs = !cachedNoOp && operations.resolveTranslationNeed(artifact.original, song,
       { targetLanguage: config.targetLanguage, artifact }).state !== 'not_needed';
@@ -45,7 +49,7 @@ export function createWorkbenchSourceCore({ env, db, session, executionContext, 
     const supported = Boolean(valid || available && state !== 'not_needed');
     return { quality: grade(document, artifact, config), document, artifact, etag: read.etag,
       translation: { supported, state: supported || state === 'not_needed' ? state : 'unavailable', targetLanguage: config.targetLanguage,
-        language: valid ? translation.language || null : null,
+        language: valid ? translationLanguage : null,
         source: valid ? translation.source : available ? 'ai' : null,
         kind: valid ? translation.kind || (translation.source === 'ai' ? 'ai' : translation.source === 'manual' ? 'manual' : 'provider') : available ? 'ai' : null,
         lines: valid ? [...translation.lines] : [],
@@ -117,13 +121,15 @@ export function createWorkbenchSourceCore({ env, db, session, executionContext, 
       && winner.provenance?.assessmentKey === expected.provenance?.assessmentKey
       && JSON.stringify(winner.original) === JSON.stringify(expected.original);
   };
-  const prepare = async (song, config, options) => {
-    const initial = await current(song), artifact = readyArtifact(initial);
+  const prepare = async (song, config, options, claimedRead) => {
+    const initial = claimedRead || await current(song), artifact = readyArtifact(initial);
     if (artifact && isProtectedWorkbenchArtifact(artifact)) return { read: initial, changed: false };
     const missAge = (dependencies.now || Date.now)() - Date.parse(initial.artifact?.updatedAt);
     if (initial.artifact?.status === 'deleting' || initial.artifact?.status === 'not_found' && missAge >= 0 && missAge < MISS_TTL_MS) return { read: initial, changed: false };
     if (operations.assessmentSettings) Object.assign(config, await operations.assessmentSettings(config));
     if (artifact && isAssessed(artifact, config)) return { read: initial, changed: false };
+    const checkedKey = JSON.stringify([initial.etag, config.assessmentKey, config.onlineEnabled, config.lyricPreference]);
+    if (artifact && checkedFiles.get(song.id) === checkedKey) return { read: initial, changed: false };
     let selected = artifact ? documentFor(artifact, song) : null;
     let selectedFromFile = Boolean(artifact);
     if (config.onlineEnabled) {
@@ -145,6 +151,13 @@ export function createWorkbenchSourceCore({ env, db, session, executionContext, 
         if (initial.etag) await store.putIfMatch(song.id, empty, initial.etag, { signal: options.signal });
         else await store.createIfAbsent(song.id, empty, { signal: options.signal });
       }
+      return { read: initial, changed: false };
+    }
+    // Reusing the same original does not require a storage mutation merely to
+    // record that providers were checked. Keep this evaluation in this request;
+    // the original ETag and provenance remain valid for completion and CAS.
+    if (artifact && selectedFromFile) {
+      checkedFiles.set(song.id, checkedKey);
       return { read: initial, changed: false };
     }
     let built = await operations.buildArtifact(song, selected, { targetLanguage: config.targetLanguage });
@@ -170,17 +183,23 @@ export function createWorkbenchSourceCore({ env, db, session, executionContext, 
       if (!song?.id || song.language === 'instrumental') return false;
       await operations.assertReadScope?.();
       const config = await settings();
-      return config.onlineEnabled || Boolean(readyArtifact(await current(song)));
+      if (config.onlineEnabled) return true;
+      const read = await current(song);
+      if (!readyArtifact(read)) return false;
+      claimedReads.set(song.id, read);
+      return true;
     },
     async resolve(song, options = {}) {
       if (!song?.id || song.language === 'instrumental') return null;
       options.signal?.throwIfAborted();
-      await operations.assertCurrent();
+      await beginRead();
       const config = await settings();
+      const claimedRead = options.resultRef ? null : claimedReads.get(song.id);
+      claimedReads.delete(song.id);
       const planned = store.singleflight
-        ? await store.singleflight(song.id, ({ signal = options.signal } = {}) => prepare(song, config, { ...options, signal }),
+        ? await store.singleflight(song.id, ({ signal = options.signal } = {}) => prepare(song, config, { ...options, signal }, claimedRead),
           { signal: options.signal, executionContext })
-        : await prepare(song, config, options);
+        : await prepare(song, config, options, claimedRead);
       if (!readyArtifact(planned.read)) return null;
       const selectedHash = planned.read.artifact.textHash;
       return toResult(planned.read, song, config, { onAdopt: async () => {
@@ -209,7 +228,7 @@ export function createWorkbenchSourceCore({ env, db, session, executionContext, 
     },
     async translate(ref, options = {}) {
       if (!ref?.songId || !ref.textHash) throw safeFailure('LYRIC_RESULT_STALE');
-      await operations.assertCurrent();
+      await beginRead();
       const config = await settings();
       if (ref.sourceRef?.targetLanguage && ref.sourceRef.targetLanguage !== config.targetLanguage) throw safeFailure('LYRIC_RESULT_STALE');
       const song = options.song || await operations.resolveSong(ref.songId);

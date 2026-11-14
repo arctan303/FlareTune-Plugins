@@ -17,8 +17,14 @@
 
 - 稳定源固定为 `https://raw.githubusercontent.com/arctan303/FlareTune-Plugins/main/repository.json`。保留已发布的旧版条目，供宿主按最低 API 和依赖选择；新版加入目录不强制更新已安装插件。
 - 开发源固定为 `https://raw.githubusercontent.com/arctan303/FlareTune-Plugins/dev/catalogs/development.json`，用于已验证的增强宿主和测试组合。它与稳定源分开，不通过临时分支名分发。
-- `main` 的当前源码组合为 Gateway 0.2.1、Assistant 0.2.0、Lyrics Workbench 1.0.0、Roam 0.1.1、Xiaomi Speaker 1.1.1、YouTube Music 0.2.5；工作台 1.0.0 最低宿主能力兼容编号 5，YT 0.2.5 最低宿主 API 4，旧版 API 2／3 条目继续保留，不强制升级现有站点。
+- `main` 的当前源码组合为 Gateway 0.2.1、Assistant 0.2.0、Lyrics Workbench 1.0.2、Roam 0.1.1、Xiaomi Speaker 1.1.1、YouTube Music 0.2.5；工作台 1.0.2 最低宿主能力兼容编号 5，YT 0.2.5 最低宿主 API 4，旧版 API 2／3 条目继续保留，不强制升级现有站点。
 - YT 0.2.4 已包含增强来源链、原生译文和搜索原名展示，要求 API 4 宿主。工作台 0.3.x 仍按开发目录发布；历史增强 API 3 包依赖额外的歌词接口，不能仅凭相同 API 数字认定兼容。
+
+### 歌词工作台 1.0.2 / Lyrics workspace 1.0.2
+
+减少同一次歌词请求中的重复读取，避免为未变化的原词执行仅记录评估结果的写入；修复历史来源译文缺少显式语言字段时的读取兼容，保留有效译文并避免不必要的 AI 调用。写入与响应发布仍核对当前权限、安装和配置；候选评分、来源顺序、主要语言策略和客户端接口不变。最低宿主能力仍为 5，数据版本仍为 0。源码、包及优化宿主组合已完成本地验证、独立复核和 dev 实测；发布不会自动更新站点。详见[中英发布说明](release-notes/lyrics-workbench-1.0.2.md)。
+
+Reuses reads within each lyric request and avoids assessment-only writes to unchanged originals. Historical provider translations without explicit language fields remain usable without unnecessary AI. Writes and response publication still verify live permissions, installation and configuration. Candidate scoring, source order, predominant-language policy and client APIs are unchanged. Host capability level 5 and data version 0 remain required. The reviewed package and optimized host combination passed local and dev validation; publishing does not automatically update sites. See the [bilingual release notes](release-notes/lyrics-workbench-1.0.2.md).
 
 ### 歌词工作台 1.0.0 / Lyrics workspace 1.0.0
 

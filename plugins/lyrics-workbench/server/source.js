@@ -1,4 +1,5 @@
 import { createLyricDocument } from '@flaretune/plugin-sdk/server/lyric-document';
+import { storedLyricTranslationLanguage } from '@flaretune/plugin-sdk/server/lyric-source-contract';
 import { lyricArtifactStoreForEnv, buildReadyLyricArtifact, projectLyricArtifact,
   hasCurrentLyricNoTranslationDecision } from '@flaretune/plugin-sdk/server/lyric-workflow';
 import { preferredAutomaticDocument, reliableAutomaticMatch } from '@flaretune/plugin-sdk/server/lyric-resolution';
@@ -94,6 +95,11 @@ export function createLyricSource({ env, db = env?.DB, session, executionContext
       fetchNativeDocument: undefined },
     operations: {
       assertCurrent: authority,
+      // The host context already authorized this request at initialization.
+      // Read-scope checks retain cancellation; writes and response publication
+      // still use the host's live authority and configuration gates.
+      beginRead: context?.plugin?.id === 'lyrics-workbench' && typeof dependencies.assertReadScope === 'function'
+        ? dependencies.assertReadScope : authority,
       assertReadScope: async () => { await dependencies.assertReadScope?.(); context?.signal?.throwIfAborted(); },
       settings: async () => {
         await dependencies.assertReadScope?.();
@@ -106,6 +112,7 @@ export function createLyricSource({ env, db = env?.DB, session, executionContext
       createDocument: dependencies.createDocument || createLyricDocument,
       buildArtifact: dependencies.buildArtifact || buildReadyLyricArtifact,
       project: dependencies.project || projectLyricArtifact,
+      translationLanguage: storedLyricTranslationLanguage,
       resolveTranslationNeed: dependencies.resolveTranslationNeed || ((original, song, { artifact, ...options }) =>
         dominantLyricTranslationNeed(artifact || { original }, song, options)),
       hasNoTranslationDecision: dependencies.hasNoTranslationDecision || hasCurrentLyricNoTranslationDecision,

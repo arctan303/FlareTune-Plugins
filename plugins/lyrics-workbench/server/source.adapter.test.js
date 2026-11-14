@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url';
 // provider or host checkout is required by the standalone plugin test suite.
 const capabilities = `
 export const createLyricDocument = x => structuredClone(x);
+export const storedLyricTranslationLanguage = value => value?.language
+  || (['custom_krc','custom_lrc','kugou','netease','ai'].includes(value?.source) ? 'zh' : null);
 export const isLeadingProviderMetadata = () => false;
 export const isSingableLineText = x => /[\\p{L}\\p{N}]/u.test(x || '');
 export const getCurrentLyricTranslationDecision = (artifact,song,{targetLanguage}) => {
