@@ -58,7 +58,7 @@ test('stable catalog retains every baseline identity and its explicitly declared
   }
   for(const identity of additions) assert.ok(catalog.plugins.some(row=>key(row)===identity),identity);
   assert.deepEqual([...new Set(catalog.plugins.map(row=>row.manifest.hostApiVersion))].sort(),
-    additions.includes('lyrics-workbench@1.0.0') ? [2,3,4,5] : [2,3,4]);
+    (Object.hasOwn(baseline.stable,'lyrics-workbench@1.0.0') || additions.includes('lyrics-workbench@1.0.0')) ? [2,3,4,5] : [2,3,4]);
   for(const [id,version] of Object.entries({'ai-gateway':'0.2.1',assistant:'0.2.0','lyrics-workbench':'0.2.1',roam:'0.1.1','xiaomi-speaker':'1.1.1','youtube-music':'0.1.1'})) {
     assert.ok(catalog.plugins.some(row=>row.manifest.id===id&&row.manifest.version===version));
   }
