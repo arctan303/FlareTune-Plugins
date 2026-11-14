@@ -36,8 +36,10 @@ export function createWorkbenchSourceCore({ env, db, session, executionContext, 
     const projected = operations.project(artifact, { song, targetLanguage: config.targetLanguage });
     // Projection hides invalid legacy layers without mutating their saved bytes.
     const translation = projected?.translation;
+    const translationLanguage = operations.translationLanguage ? operations.translationLanguage(translation)
+      : translation?.language || (translation?.source === 'ai' ? 'zh' : null);
     const valid = translation && translation.originalTextHash === artifact.textHash
-      && spokenLanguageMatches(translation.language || (translation.source === 'ai' ? 'zh' : null), config.targetLanguage);
+      && spokenLanguageMatches(translationLanguage, config.targetLanguage);
     const cachedNoOp = operations.hasNoTranslationDecision(artifact, song, { targetLanguage: config.targetLanguage });
     const needs = !cachedNoOp && operations.resolveTranslationNeed(artifact.original, song,
       { targetLanguage: config.targetLanguage, artifact }).state !== 'not_needed';
@@ -47,7 +49,7 @@ export function createWorkbenchSourceCore({ env, db, session, executionContext, 
     const supported = Boolean(valid || available && state !== 'not_needed');
     return { quality: grade(document, artifact, config), document, artifact, etag: read.etag,
       translation: { supported, state: supported || state === 'not_needed' ? state : 'unavailable', targetLanguage: config.targetLanguage,
-        language: valid ? translation.language || null : null,
+        language: valid ? translationLanguage : null,
         source: valid ? translation.source : available ? 'ai' : null,
         kind: valid ? translation.kind || (translation.source === 'ai' ? 'ai' : translation.source === 'manual' ? 'manual' : 'provider') : available ? 'ai' : null,
         lines: valid ? [...translation.lines] : [],

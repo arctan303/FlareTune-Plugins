@@ -1,4 +1,5 @@
 import { createLyricDocument } from '@flaretune/plugin-sdk/server/lyric-document';
+import { storedLyricTranslationLanguage } from '@flaretune/plugin-sdk/server/lyric-source-contract';
 import { lyricArtifactStoreForEnv, buildReadyLyricArtifact, projectLyricArtifact,
   hasCurrentLyricNoTranslationDecision } from '@flaretune/plugin-sdk/server/lyric-workflow';
 import { preferredAutomaticDocument, reliableAutomaticMatch } from '@flaretune/plugin-sdk/server/lyric-resolution';
@@ -111,6 +112,7 @@ export function createLyricSource({ env, db = env?.DB, session, executionContext
       createDocument: dependencies.createDocument || createLyricDocument,
       buildArtifact: dependencies.buildArtifact || buildReadyLyricArtifact,
       project: dependencies.project || projectLyricArtifact,
+      translationLanguage: storedLyricTranslationLanguage,
       resolveTranslationNeed: dependencies.resolveTranslationNeed || ((original, song, { artifact, ...options }) =>
         dominantLyricTranslationNeed(artifact || { original }, song, options)),
       hasNoTranslationDecision: dependencies.hasNoTranslationDecision || hasCurrentLyricNoTranslationDecision,
