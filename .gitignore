@@ -2,3 +2,19 @@ node_modules/
 .output/
 *.log
 .env*
+
+# Local maintainer documents and agent state live outside the source repository.
+/docs/
+/research/
+/design/
+/AGENTS.md
+/CLAUDE.md
+/EVOLUTION.md
+/.agents/
+/.creator/
+/.codex/
+/.claude/
+/.creator-manifest.json
+/.version
+/local/
+/worktrees/
