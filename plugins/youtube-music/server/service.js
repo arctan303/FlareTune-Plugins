@@ -8,6 +8,7 @@ import { assertPublicVideo } from "./public-visibility.js";
 import { fetchTimedLyrics, normalizeTimedLyrics } from "./timed-lyrics.js";
 import { fetchNativeLyrics } from "./native-translation.js";
 import { DEFAULT_YOUTUBE_SETTINGS } from "../shared/preferences.js";
+import { createOriginalTitleResolver } from './original-title.js';
 const metadata = new Map();
 function remember(song, hl, region = 'US') {
   if (!song?.sourceId || song.kind !== 'song' || !song.title) return song;
@@ -29,6 +30,11 @@ export function createYouTubeService({ env, credentials, epoch, ctx, services = 
   const requirePublicVideo = services.assertPublicVideo || assertPublicVideo;
   const guest = async hl => { localeOf(hl, settings.region); return manager.guest(hl, settings.region); };
   const result = {
+    // The HTTP search page owns presentation. Keep Music/cache metadata intact
+    // for account references, playback and lyric matching.
+    async projectSearchDisplayTitles(songs, options = {}) {
+      return createOriginalTitleResolver(services.originalTitleFetch ? { fetchImpl: services.originalTitleFetch } : {})(songs, options);
+    },
     async validateAuth() {
       await manager.tv('en');
       return { connected: true, profile: 'TV_SAMSUNG_QJS' };

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { hookComponent, nodes, text, button, flushAsync } from '../../../tests/lyricCandidateHarness.js';
 import * as editor from './editor.js';
 import * as shift from './timelineShift.js';
+import { workbenchMessage } from '../shared/messages.js';
 
 const dictionary = {
   '逐字': 'Word timing', '逐行': 'Line timing', '未位移': 'No shift',
@@ -33,7 +34,7 @@ function setup({ managed: overrides = {}, section = 'current', translator = tran
     modules: {
       '../../../shared/lyricSources.js': { lyricSourceLabel: x => x }, '@flaretune/plugin-sdk/client/i18n': { t: translator },
       './SettingsReadOnly.jsx': { SettingsInput: 'input', useSettingsReadOnly: () => false },
-      '@flaretune/plugin-sdk': { t: translator, lyricSourceLabel: x => x, SettingsInput: 'input', useSettingsReadOnly: () => false,
+      '@flaretune/plugin-sdk': { t: translator, useLocale: () => 'en', lyricSourceLabel: x => x, SettingsInput: 'input', SettingsToggle: 'toggle', useSettingsReadOnly: () => false,
         SyncedLyricText: 'SyncedLyricText', ProgressBar: 'ProgressBar', PageBackButton: 'PageBackButton' },
       './useHostPlayer.js': { useHostPlayer: () => ({ currentSong: null, currentTime: 0, duration: 200 }) },
       './LyricsSettings.jsx': 'LyricsSettings',
@@ -49,7 +50,7 @@ function setup({ managed: overrides = {}, section = 'current', translator = tran
       '../utils/navigation.js': { formatPath: () => '/lyrics/s1', syncBrowserHistory() {}, returnToOriginRoute() {} },
       './lyrics/SyncedLyricText.jsx': 'SyncedLyricText', './playerbar/ProgressBar.jsx': 'ProgressBar',
       './PageBackButton.jsx': 'PageBackButton', './editor.js': editor,
-      './previewScroll.js': {}, './timelineShift.js': shift, './workspace.css': {},
+      './previewScroll.js': {}, './timelineShift.js': shift, './workspace.css': {}, '../shared/messages.js': { workbenchMessage },
     }, globals: { window: { confirm: message => { confirmations.push(message); return false; },
       addEventListener() {}, removeEventListener() {} } } });
   const props = { host: { isCurrent: () => true, notify() {}, session: { get: () => ui.authSession }, beforeLeave: { register: () => () => {}, approve: () => true }, navigate() {}, returnToOrigin() {} }, pageId: section, context: { song, route: { songId: 's1', section } } };

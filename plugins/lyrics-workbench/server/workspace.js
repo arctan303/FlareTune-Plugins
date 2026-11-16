@@ -20,10 +20,12 @@ import {
   buildReadyLyricArtifact,
   lyricArtifactStoreForEnv,
   projectLyricArtifact,
+  buildLyricTranslationDecision,
+  LYRIC_TRANSLATION_POLICY_VERSION,
 } from "@flaretune/plugin-sdk/server/lyric-workflow";
-import { beginLyricAssetAiCompletion, resolveLegacyLyricCleanup } from "./translation.js";
+import { beginLyricAssetAiCompletion, safeLyricValidationDiagnostic } from "./translation.js";
 import { completeLyricDraft } from "./draftAi.js";
-import { verifyLyricDraftReceipt } from "./draftReceipt.js";
+import { verifyLyricDraftReceiptData } from "./draftReceipt.js";
 import { loadLyricAiConfig, loadLyricAiProcessingSettings } from "./config.js";
 import { lyricSourceLoaderForDb } from "@flaretune/plugin-sdk/server/lyric-source-settings";
 import {
@@ -92,6 +94,12 @@ const validEtag = (value) => value === null
     && !/[\u0000-\u001f\u007f]/u.test(value));
 
 const validTranslationLanguage = value => value === undefined || isTranslationTarget(value);
+
+function withCleanupConsent(deps, cleanDirtyLyrics = false) {
+  return { ...deps, lyricConfig: { ...deps.lyricConfig, cleanDirtyLyrics },
+    ...(deps.aiAccess ? { aiAccess: { ...deps.aiAccess,
+      config: { ...deps.aiAccess.config, cleanDirtyLyrics } } } : {}) };
+}
 
 function currentData(read, song, now, targetLanguage = null, viewerAccountId = null) {
   if (read.state === 'missing' || read.state === 'legacy' || read.artifact?.status === 'reset') {
@@ -297,11 +305,11 @@ export async function handleLyricsWorkbenchRoute(request, url, db, headers = {},
       }
     }
     const completionEnabled = settings.completionEnabled && gatewayAvailable;
-    const aiDeps = { ...deps.aiDeps, lyricConfig: settings, ...(aiLease ? { aiLease } : {}) };
+    let aiDeps = withCleanupConsent({ ...deps.aiDeps, lyricConfig: settings, ...(aiLease ? { aiLease } : {}) });
     if (aiLease && ['ai-completion', 'draft-ai'].includes(action)) {
       const access = await createLyricsAiAccess({ env, db, session, context: deps.context,
         signal: request.signal, deps: aiDeps });
-      aiDeps.aiAccess = access;
+      aiDeps = withCleanupConsent({ ...aiDeps, aiAccess: access });
       deps.useAiLease?.(access.client);
       // This service lease preserves the operation's admin/member scope and
       // adds Gateway authority, so the shared I/O needs one combined gate.
@@ -317,7 +325,7 @@ export async function handleLyricsWorkbenchRoute(request, url, db, headers = {},
       if ([...url.searchParams.keys()].length) return failure(400, 'INVALID_QUERY', 'Unexpected query', headers);
       const read = notDeleting(await store.get(songId));
       return success({ song, aiCompletionEnabled: completionEnabled,
-        ...dataOf(await resolveLegacyLyricCleanup(store, song, read, now)) }, 200, headers);
+        ...dataOf(read) }, 200, headers);
     }
     if (!completionEnabled && ['ai-completion', 'draft-ai'].includes(action)) {
       if (settings.completionEnabled && !gatewayAvailable) return failure(409, 'PLUGIN_DEPENDENCY_UNAVAILABLE', 'Lyric AI gateway is unavailable', headers);
@@ -445,15 +453,33 @@ export async function handleLyricsWorkbenchRoute(request, url, db, headers = {},
       } catch {
         return failure(422, 'INVALID_LYRIC_DOCUMENT', 'Lyric lines are invalid', headers);
       }
-      const inferredLanguage = body.aiReceipt === undefined ? null
-        : await verifyLyricDraftReceipt(env, body.aiReceipt, {
+      const receipt = body.aiReceipt === undefined ? null
+        : await verifyLyricDraftReceiptData(env, body.aiReceipt, {
           songId, accountId: session.account.accountId, etag: body.etag,
           textHash: artifact.textHash, now: now(),
         });
-      if (body.aiReceipt !== undefined && !inferredLanguage) {
+      if (body.aiReceipt !== undefined && !receipt) {
         return failure(400, 'INVALID_LYRIC_DRAFT_RECEIPT', 'Draft AI result is no longer valid', headers);
       }
-      const written = await writeCurrent(store, songId, artifact, current, body.etag);
+      const inferredLanguage = receipt?.language || null;
+      if (receipt) {
+        try {
+          artifact = await buildEditedLyricArtifact({ ...song, language: inferredLanguage }, body.lines, { now: now(), targetLanguage,
+            translationLanguage: body.translationLanguage || storedLyricTranslationLanguage(current.artifact?.translation) || targetLanguage });
+          if (receipt.decision) {
+            if (receipt.decision.policyVersion !== LYRIC_TRANSLATION_POLICY_VERSION) throw new Error('LYRIC_POLICY_CHANGED');
+            // The signed receipt binds the actual draft text/account/version;
+            // rebuild its decision for the final save rather than trusting the client.
+            artifact.translationDecision = buildLyricTranslationDecision(artifact,
+              inferredLanguage && !isExternalLyricSongId(songId) ? { ...song, language: inferredLanguage } : song, {
+              ...receipt.decision, targetLanguage: receipt.decision.targetLanguage,
+            });
+          }
+        } catch {
+          return failure(422, 'INVALID_LYRIC_DOCUMENT', 'Lyric lines are invalid', headers);
+        }
+      }
+      let written = await writeCurrent(store, songId, artifact, current, body.etag);
       if (written.state === 'conflict') return failure(409, 'LYRIC_ASSET_CONFLICT', 'Lyric asset changed', headers);
       let languageUpdateFailed = false;
       if (inferredLanguage && inferredLanguage !== song.language && !isExternalLyricSongId(songId)) {
@@ -468,12 +494,20 @@ export async function handleLyricsWorkbenchRoute(request, url, db, headers = {},
           languageUpdateFailed = true;
         }
       }
+      if (languageUpdateFailed && written.artifact?.translationDecision) {
+        const { translationDecision: _uncommittedLanguageDecision, ...retryable } = written.artifact;
+        const failedAt = new Date(now()).toISOString();
+        const failed = await store.putIfMatch(songId, { ...retryable,
+          aiCompletion: { status: 'failed', errorCode: 'language_update_failed', updatedAt: failedAt }, updatedAt: failedAt }, written.etag);
+        written = failed.state === 'updated' ? failed : await store.get(songId);
+      }
       return success({ ...dataOf({ ...written, state: 'found' }), languageUpdateFailed }, 200, headers);
     }
     if (action === 'draft-ai') {
-      const body = await bodyOf(request, ['lines', 'etag', 'translationLanguage'], ['lines', 'etag'], 2 * 1024 * 1024);
+      const body = await bodyOf(request, ['lines', 'etag', 'translationLanguage', 'cleanDirtyLyrics'], ['lines', 'etag'], 2 * 1024 * 1024);
       if (!body || !validEtag(body.etag) || !validEditorLines(body.lines)
-        || !validTranslationLanguage(body.translationLanguage)) {
+        || !validTranslationLanguage(body.translationLanguage)
+        || body.cleanDirtyLyrics !== undefined && typeof body.cleanDirtyLyrics !== 'boolean') {
         return failure(400, 'INVALID_LYRIC_DRAFT', 'Invalid lyric draft', headers);
       }
       const current = notDeleting(await store.get(songId));
@@ -486,7 +520,7 @@ export async function handleLyricsWorkbenchRoute(request, url, db, headers = {},
           env, db, song, lines: body.lines, etag: body.etag,
           translationLanguage: body.translationLanguage || storedLyricTranslationLanguage(current.artifact?.translation) || targetLanguage,
           actorAccountId: session.account.accountId,
-          deps: aiDeps,
+          deps: withCleanupConsent(aiDeps, body.cleanDirtyLyrics === true),
         });
       } catch (error) {
         return knownFailure(error, headers)
@@ -497,7 +531,10 @@ export async function handleLyricsWorkbenchRoute(request, url, db, headers = {},
               ? 'Lyric draft cannot be processed' : 'AI completion failed', headers);
       }
       if (result.status !== 'ready') {
-        return failure(503, 'LYRIC_AI_FAILED', result.errorCode || 'AI completion failed', headers);
+        const diagnostic = safeLyricValidationDiagnostic(result.diagnostic);
+        return failure(503, 'LYRIC_AI_FAILED', result.errorCode || 'AI completion failed', headers,
+          diagnostic ? { diagnostic: { code: diagnostic.validationCode, stage: diagnostic.stage,
+            ...(diagnostic.batchIndex === undefined ? {} : { batch: diagnostic.batchIndex }) } } : undefined);
       }
       return success(result, 200, headers);
     }

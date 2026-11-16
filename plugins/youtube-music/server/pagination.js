@@ -53,12 +53,12 @@ export async function pagedSearch(yt, query, { filter, hl, offset = 0, limit = 2
   const key = JSON.stringify([cacheNamespace, hl, filter, query]);
   const entry = await cached(searches, key, async () => {
     const page = await yt.music.search(query, { type: filter });
-    const value = searchResult(page);
+    const value = searchResult(page, { filter });
     return { page, sections: value.sections, items: value.items, hasMore: value.hasMore, work: null };
   });
   await extend(entry, options.end, value => value.items.length, async value => {
     value.page = await value.page.getContinuation();
-    const next = searchResult(value.page);
+    const next = searchResult(value.page, { filter });
     value.items.push(...next.items.slice(0, MAX_ITEMS - value.items.length));
     value.hasMore = next.hasMore && value.items.length < MAX_ITEMS;
   });

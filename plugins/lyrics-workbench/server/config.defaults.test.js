@@ -35,6 +35,13 @@ test('a new policy can load without an installed gateway or legacy assistant row
 test('processing-only reads use the same installation snapshot contract', async () => {
   const db = database('ko'); const result = await loadLyricAiProcessingSettings(db); assert.equal(result.targetLanguage,'ko'); assert.equal(db.queries,1);
 });
+test('reading old manual policy enables preparation without writing or changing its selected target and model', async () => {
+  const previous = { ...saved, completionEnabled: true, automaticCompletionEnabled: false };
+  const db = database('zh', previous); const full = await loadLyricAiConfig(db);
+  assert.equal(full.completionEnabled, true); assert.equal(full.automaticCompletionEnabled, true);
+  assert.equal(full.targetLanguage, 'ja'); assert.equal(full.model, 'saved'); assert.equal(db.queries, 1);
+  assert.equal(previous.automaticCompletionEnabled, false);
+});
 test('script-specific targets stay separate while accepted source aliases match', () => {
   assert.equal(translationLanguageMatches('zh-CN','zh'),true); assert.equal(translationLanguageMatches('zh-TW','zh-Hant'),true);
   assert.equal(translationLanguageMatches('zh-Hant','zh'),false); assert.equal(translationLanguageMatches('zh','zh-Hant'),false);

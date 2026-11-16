@@ -1,4 +1,4 @@
-import { t, lyricSourceLabel, SettingsInput, useSettingsReadOnly, findActiveLyricLineIndex, SyncedLyricText, ProgressBar, PageBackButton } from "@flaretune/plugin-sdk";
+import { t, useLocale, lyricSourceLabel, SettingsInput, SettingsToggle, useSettingsReadOnly, findActiveLyricLineIndex, SyncedLyricText, ProgressBar, PageBackButton } from "@flaretune/plugin-sdk";
 import React from 'react';
 import { Check, ChevronDown, ChevronUp, Download, FileUp, Languages, Loader2,
   Plus, RefreshCw, Trash2 } from 'lucide-react';
@@ -11,6 +11,7 @@ import { centeredLyricScrollTop } from "./previewScroll.js";
 import { projectTimelineShift, stepTimelineShift, timelineShiftAtY } from "./timelineShift.js";
 import "./workspace.css";
 import LyricsSettings from "./LyricsSettings.jsx";
+import { workbenchMessage } from '../shared/messages.js';
 
 const MODES = { word: '逐字', line: '逐行', none: '无时间轴' };
 const playbackTime = (seconds) => {
@@ -187,6 +188,8 @@ export default function LyricsPluginPage(props) {
 }
 function LyricsWorkspaceContent({ host, pageId, context = {} }) {
   const readOnly = useSettingsReadOnly();
+  const locale = useLocale();
+  const tr = key => workbenchMessage(key, locale);
   const route = context.route || {};
   const playback = useHostPlayer(host);
   const selectedSong = context.song || playback.currentSong;
@@ -211,6 +214,7 @@ function LyricsWorkspaceContent({ host, pageId, context = {} }) {
   const [rows, setRows] = React.useState([]);
   const [shift, setShift] = React.useState(0);
   const [draftAiBusy, setDraftAiBusy] = React.useState(false);
+  const [draftCleanup, setDraftCleanup] = React.useState(false);
   const draftRequestRef = React.useRef(0);
   const draftEditVersionRef = React.useRef(0);
   const draftReceiptRef = React.useRef(null);
@@ -230,7 +234,7 @@ function LyricsWorkspaceContent({ host, pageId, context = {} }) {
   const rowErrors = React.useMemo(() => validateLyricRows(rows), [rows]);
   const canDiscardEdits = () => {
     const hasRowChanges = editing && JSON.stringify(rows) !== JSON.stringify(initialRowsRef.current);
-    return (!hasRowChanges && shift === 0) || window.confirm(t('歌词有未保存的修改或位移草稿，确定放弃吗？'));
+    return (!hasRowChanges && shift === 0 && !draftCleanup) || window.confirm(t('歌词有未保存的修改或位移草稿，确定放弃吗？'));
   };
   closeGuardRef.current = canDiscardEdits;
   const discardEdits = () => {
@@ -241,6 +245,7 @@ function LyricsWorkspaceContent({ host, pageId, context = {} }) {
     setEditing(false);
     setActiveCell(null);
     setShift(0);
+    setDraftCleanup(false);
     return true;
   };
   const leaveWorkspace = () => {
@@ -252,19 +257,20 @@ function LyricsWorkspaceContent({ host, pageId, context = {} }) {
     setEditing(false); setActiveCell(null); setShift(0);
     draftRequestRef.current += 1; setDraftAiBusy(false);
     draftReceiptRef.current = null;
+    setDraftCleanup(false);
   }, [song?.id]);
   React.useEffect(() => {
     return host.beforeLeave.register(() => closeGuardRef.current());
   }, [host]);
   React.useEffect(() => {
-    if ((!editing || JSON.stringify(rows) === JSON.stringify(initialRowsRef.current)) && shift === 0) return undefined;
+    if ((!editing || JSON.stringify(rows) === JSON.stringify(initialRowsRef.current)) && shift === 0 && !draftCleanup) return undefined;
     const warnBeforeUnload = (event) => {
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', warnBeforeUnload);
     return () => window.removeEventListener('beforeunload', warnBeforeUnload);
-  }, [editing, rows, shift]);
+  }, [editing, rows, shift, draftCleanup]);
   if (!song) return <div className="lyric-studio"><p>{t("请选择歌曲后打开歌词工作台。")}</p></div>;
 
   const patchRow = (key, patch) => {
@@ -303,10 +309,11 @@ function LyricsWorkspaceContent({ host, pageId, context = {} }) {
     if (changedWordRows && !window.confirm(t('有 {count} 行修改了逐字内容，保存后这些行会改为逐行同步。继续吗？', { count: changedWordRows }))) return;
     const result = await managed.saveDocument(lines, editingEtagRef.current, draftReceiptRef.current,
       draftTranslationLanguageRef.current);
-    if (result === true) { setEditing(false); setActiveCell(null); setShift(0); }
+    if (result === true) { setEditing(false); setActiveCell(null); setShift(0); setDraftCleanup(false); }
     else if (result === 'conflict') {
       setEditing(false); setActiveCell(null);
       setRows([]);
+      setDraftCleanup(false);
       showToast(t("歌词已由其他人更新，请基于最新版本重新打开编辑。"));
     }
   };
@@ -315,10 +322,11 @@ function LyricsWorkspaceContent({ host, pageId, context = {} }) {
     if (!lines) return;
     const requestId = ++draftRequestRef.current;
     const editVersion = draftEditVersionRef.current;
+    const cleanDirtyLyrics = draftCleanup;
     setDraftAiBusy(true);
     try {
       const response = await lyricsWorkspaceApi.completeDraftLyrics(song.id,
-        { lines, etag: editingEtagRef.current, translationLanguage: draftTranslationLanguageRef.current });
+        { lines, etag: editingEtagRef.current, translationLanguage: draftTranslationLanguageRef.current, cleanDirtyLyrics });
       if (!host.isCurrent() || draftRequestRef.current !== requestId) return;
       if (draftEditVersionRef.current !== editVersion) {
         showToast(t("AI 处理期间草稿已修改，保留当前修改；需要时可重新补全"));
@@ -330,11 +338,11 @@ function LyricsWorkspaceContent({ host, pageId, context = {} }) {
       setRows(makeRows({ lines: completed.lines }));
       setShift(0);
       setActiveCell(null);
-      showToast(t("AI 已补全并清理草稿，检查后保存一次即可共享"));
+      showToast(tr(cleanDirtyLyrics ? 'draftCleaned' : 'draftCompleted'));
     } catch (error) {
       if (host.isCurrent() && draftRequestRef.current === requestId) showToast(t(error?.message || '草稿 AI 补全失败'));
     } finally {
-      if (draftRequestRef.current === requestId) setDraftAiBusy(false);
+      if (draftRequestRef.current === requestId) { setDraftAiBusy(false); setDraftCleanup(false); }
     }
   };
   const completeDraft = () => completeDraftWithLines(collectDraftLines());
@@ -397,6 +405,7 @@ function LyricsWorkspaceContent({ host, pageId, context = {} }) {
           draftTranslationLanguageRef.current = managed.asset?.translation?.language || null;
           setRows(nextRows);
           setActiveCell(null);
+          setDraftCleanup(false);
           setEditing(true);
         }}>{t("编辑歌词")}</button>}
         {editing && <><button type="button" disabled={draftAiBusy} onClick={discardEdits}>{t("取消")}</button>
@@ -410,6 +419,11 @@ function LyricsWorkspaceContent({ host, pageId, context = {} }) {
       }}>{t("切到当前歌曲")}</button></div>}
     <div className="lyric-studio__layout">
       {section === 'current' && <section className="lyric-studio__main" aria-label={t("当前歌词")}>
+        {editing && isAdmin && managed.aiCompletionEnabled && <div className="mb-3">
+          <SettingsToggle label={tr('cleanupWithDraft')} checked={draftCleanup}
+            disabled={readOnly || draftAiBusy || managed.saving}
+            onChange={event => { draftEditVersionRef.current += 1; setDraftCleanup(event.target.checked); }} />
+        </div>}
         {managed.loading && <div className="lyric-studio__empty"><Loader2 className="animate-spin" />{t("正在读取歌词…")}</div>}
         {managed.refreshing && <p role="status">{t('正在更新歌词…')}</p>}
         {!managed.loading && !managed.error && !hasAsset && !editing && <div className="lyric-studio__empty"><Languages size={28} />
@@ -468,6 +482,7 @@ function LyricsWorkspaceContent({ host, pageId, context = {} }) {
             draftRequestRef.current += 1;
             draftEditVersionRef.current += 1;
             setDraftAiBusy(false);
+            setDraftCleanup(false);
             initialRowsRef.current = makeRows(managed.lyrics);
             editingEtagRef.current = managed.etag;
             draftReceiptRef.current = null;

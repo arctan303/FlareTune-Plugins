@@ -22,19 +22,19 @@ const OPTIONAL_FIELDS = ['completionEnabled', 'automaticCompletionEnabled', 'onl
 const LEGACY_CONFIG_FIELDS = CONFIG_FIELDS.filter(key => !OPTIONAL_FIELDS.includes(key));
 
 export function lyricAiProcessingKey(config) {
+  const completionEnabled = config.completionEnabled ?? true;
+  // Existing asset readers expect six boolean slots. The final legacy slot
+  // mirrors the one switch; it no longer represents a separate AI mode.
   return [config.targetLanguage,
     config.cleanDirtyLyrics, config.translateLyrics, config.detectLanguage,
-    config.referenceExistingTranslation, config.completionEnabled ?? true,
-    config.automaticCompletionEnabled ?? true].map((value) => typeof value === 'boolean'
+    config.referenceExistingTranslation, completionEnabled, completionEnabled].map((value) => typeof value === 'boolean'
     ? Number(value) : value).join('|');
 }
 
 export function normalizeLyricAiConfig(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).some((key) => !CONFIG_FIELDS.includes(key))
-    || LEGACY_CONFIG_FIELDS.some((key) => !Object.hasOwn(value, key))
-    || (Object.hasOwn(value, 'completionEnabled')
-      !== Object.hasOwn(value, 'automaticCompletionEnabled'))) {
+    || LEGACY_CONFIG_FIELDS.some((key) => !Object.hasOwn(value, key))) {
     throw new TypeError('INVALID_LYRIC_AI_CONFIG');
   }
   const config = { ...DEFAULT_LYRIC_AI_CONFIG, ...value };
@@ -56,6 +56,9 @@ export function normalizeLyricAiConfig(value) {
     || ![config.cleanDirtyLyrics, config.translateLyrics, config.detectLanguage].some(Boolean)) {
     throw new TypeError('INVALID_LYRIC_AI_CONFIG');
   }
-  return { ...config, provider, model, completionEnabled: config.completionEnabled && config.translateLyrics };
-
+  // 1.0 has one AI switch. Keep this alias for older host/SDK consumers, but
+  // an old manual-only preference can no longer disable automatic preparation.
+  // Explicitly disabled completion or the legacy translation switch stays off.
+  const completionEnabled = config.completionEnabled && config.translateLyrics;
+  return { ...config, provider, model, completionEnabled, automaticCompletionEnabled: completionEnabled };
 }

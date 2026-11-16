@@ -1,6 +1,7 @@
 import { AuthError } from "@flaretune/plugin-sdk/server/auth";
 import { requirePluginSession } from "@flaretune/plugin-sdk/server/plugin-common";
-import { getYouTubeBinding } from "./connection.js";
+import { getYouTubeBinding, YOUTUBE_CONNECTION_KEY } from "./connection.js";
+import { createPluginOperationLease } from "@flaretune/plugin-sdk/server/service-leases";
 import { createYouTubeService } from "./service.js";
 import { YouTubeError } from "./core.js";
 import { loadYouTubeSettings } from "./settings.js";
@@ -32,11 +33,51 @@ const codeOf = error => error?.code || error?.message || '';
 
 export async function createYouTubeAccess(env, session, ctx, { bindingFor = getYouTubeBinding,
   createService = createYouTubeService, checkSession = requirePluginSession, settingsFor = loadYouTubeSettings } = {}) {
-  await checkSession(env, session);
-  const binding = await bindingFor(env);
+  // Keep one request-owned authority snapshot. The live guarded query checks
+  // the session, credentials, role and installation epoch on every I/O; its
+  // connection revision pins the original binding without decrypting and
+  // reloading the same installation graph for every lyric-store operation.
+  const lease = bindingFor === getYouTubeBinding && checkSession === requirePluginSession
+    ? await createPluginOperationLease({ env, session, pluginId: 'youtube-music',
+      // This is the authenticated host session, not client-supplied metadata.
+      // The lease still checks live token/credentials/roles/epoch in its query.
+      requestIdentity: session?.account }) : null;
+  const guarded = lease?.guardedDb(env.DB);
+  let binding;
+  if (lease) {
+    // The adapter supplies only the already pinned installation identity.
+    // Reading the binding through guardedDb checks that identity, session and
+    // credentials in the same batch as the actual connection-row read.
+    binding = await bindingFor({ ...env, DB: guarded }, { registry: {
+      requirePluginInstalled: async (_environment, pluginId, expectedEpoch) => {
+        if (pluginId !== 'youtube-music' || expectedEpoch !== undefined && expectedEpoch !== lease.plugin.epoch) {
+          fail('YOUTUBE_CONNECTION_CHANGED');
+        }
+        return lease.plugin;
+      },
+    } });
+    if (lease.plugin.epoch !== binding.record.epoch) fail('YOUTUBE_CONNECTION_CHANGED');
+  } else {
+    await checkSession(env, session);
+    binding = await bindingFor(env);
+  }
   const settings = await settingsFor(env.DB);
   const service = createService({ env, credentials: binding.credentials, epoch: binding.epoch, ctx, settings });
   const assertCurrent = async () => {
+    if (guarded) {
+      let current;
+      try {
+        current = await guarded.prepare('SELECT revision FROM instance_settings WHERE key=?')
+          .bind(YOUTUBE_CONNECTION_KEY).first();
+      } catch (error) {
+        // A transactional guard can reject as a database error. Recover the
+        // existing typed authority diagnosis only on that failure path.
+        await lease.assertCurrent();
+        throw error;
+      }
+      if (Number(current?.revision) !== binding.record.revision) fail('YOUTUBE_CONNECTION_CHANGED');
+      return true;
+    }
     await checkSession(env, session);
     const current = await bindingFor(env, { expectedEpoch: binding.record.epoch });
     if (current.epoch !== binding.epoch) fail('YOUTUBE_CONNECTION_CHANGED');
@@ -155,11 +196,15 @@ export async function handleYouTubeMusicRoute(request, url, env, session, ctx, o
       }
       const result = await access.service.search(url.searchParams.get('q').trim(), {
         filter: field === 'songs' ? 'song' : field === 'artists' ? 'artist' : 'album', hl: languageOf(url), ...page });
-      await access.assertCurrent();
       remote = (result[field] || []).slice(page.offset, page.offset + page.limit);
       remoteHasMore = Boolean(result.hasMore);
+      if (field === 'songs' && typeof access.service.projectSearchDisplayTitles === 'function') {
+        remote = await access.service.projectSearchDisplayTitles(remote, { signal: request.signal });
+      }
+      await access.assertCurrent();
     } catch (error) {
       if (inactiveCodes.has(codeOf(error))) return json(payload);
+      remote = []; remoteHasMore = false;
       warning = { source: 'youtube', code: /429|RATE|rate/u.test(codeOf(error)) ? 'rate_limited' : 'unavailable',
         ...(error instanceof YouTubeError ? { reason: error.code } : {}) };
     }

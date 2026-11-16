@@ -48,25 +48,37 @@ test('stable catalog preserves every previously published entry, including its m
   }
 });
 
-test('stable catalog retains API2 choices alongside the pure API3 combination and excludes enhanced lyrics packages',async()=>{
+test('stable catalog retains every baseline identity and its explicitly declared additions',async()=>{
   const catalog=await readCatalog('repository.json');
-  assert.equal(catalog.plugins.length,11);
-  assert.deepEqual([...new Set(catalog.plugins.map(row=>row.manifest.hostApiVersion))].sort(),[2,3]);
+  const baseline=await readCatalog('tooling/catalog-baselines.json');
+  const additions=baseline.stableAdditions || ['youtube-music@0.2.4'];
+  assert.equal(catalog.plugins.length,Object.keys(baseline.stable).length+additions.length);
+  for(const [identity,digest] of Object.entries(baseline.stable)) {
+    assert.equal(sha(JSON.stringify(canonical(catalog.plugins.find(row=>key(row)===identity)))),digest,identity);
+  }
+  for(const identity of additions) assert.ok(catalog.plugins.some(row=>key(row)===identity),identity);
+  assert.deepEqual([...new Set(catalog.plugins.map(row=>row.manifest.hostApiVersion))].sort(),
+    (Object.hasOwn(baseline.stable,'lyrics-workbench@1.0.0') || additions.includes('lyrics-workbench@1.0.0')) ? [2,3,4,5] : [2,3,4]);
   for(const [id,version] of Object.entries({'ai-gateway':'0.2.1',assistant:'0.2.0','lyrics-workbench':'0.2.1',roam:'0.1.1','xiaomi-speaker':'1.1.1','youtube-music':'0.1.1'})) {
     assert.ok(catalog.plugins.some(row=>row.manifest.id===id&&row.manifest.version===version));
   }
-  assert.ok(!catalog.plugins.some(row=>row.manifest.id==='lyrics-workbench'&&row.manifest.version.startsWith('0.3.')
-    ||row.manifest.id==='youtube-music'&&row.manifest.version.startsWith('0.2.')));
+  assert.equal(catalog.plugins.find(row=>key(row)==='youtube-music@0.2.4').manifest.hostApiVersion,4);
+  assert.ok(!catalog.plugins.some(row=>row.manifest.id==='lyrics-workbench'&&row.manifest.version.startsWith('0.3.')));
   await validateArtifacts(catalog);
 });
 
-test('permanent development catalog, when present, preserves the original tested entries and adds immutable YT 0.2.2',async()=>{
+test('development catalog preserves every previous entry and its explicitly added API4 releases',async()=>{
   let catalog;
   try {catalog=await readCatalog('catalogs/development.json');} catch(error){if(error.code==='ENOENT')return;throw error;}
-  const original=await readCatalog('catalogs/health-ai-ownership-20261111.json');
-  assert.equal(catalog.plugins.length,14);
-  for (const previous of original.plugins) assert.deepEqual(catalog.plugins.find(row=>key(row)===key(previous)),previous);
-  assert.ok(catalog.plugins.some(row=>key(row)==='youtube-music@0.2.2'));
+  const baseline=await readCatalog('tooling/catalog-baselines.json');
+  assert.equal(catalog.plugins.length,Object.keys(baseline.development).length+baseline.developmentAdditions.length);
+  for(const [identity,digest] of Object.entries(baseline.development)) {
+    assert.equal(sha(JSON.stringify(canonical(catalog.plugins.find(row=>key(row)===identity)))),digest,identity);
+  }
+  for(const identity of baseline.developmentAdditions) {
+    assert.equal(catalog.plugins.find(row=>key(row)===identity).manifest.hostApiVersion,
+      ['lyrics-workbench@0.9.0','lyrics-workbench@0.9.1','lyrics-workbench@1.0.0','lyrics-workbench@1.0.1','lyrics-workbench@1.0.2'].includes(identity) ? 5 : 4);
+  }
   assert.ok(catalog.plugins.some(row=>key(row)==='lyrics-workbench@0.3.1'));
   assert.ok(catalog.plugins.some(row=>key(row)==='youtube-music@0.2.1'));
   await validateArtifacts(catalog);

@@ -8,10 +8,9 @@ export {
 
 import { isTranslationTarget, normalizeTranslationTarget, targetScriptEvidence, isUnchangedTranslation, translationTargetEnglishName } from '../shared/translation-languages.js';
 import { computeHash } from "@flaretune/plugin-sdk/server/lyric-parsing";
-import { isValidSongLanguage } from "@flaretune/plugin-sdk/server/song-language";
 
 const LRC_TIMESTAMP_ANY_PATTERN = /\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?\]/;
-const TRANSLATION_PROMPT_VERSION = 'lyrics-target-v6-contextual-polish';
+const TRANSLATION_PROMPT_VERSION = 'lyrics-1.0.0-translation';
 const DEFAULT_MAX_BATCH_UNITS = 120;
 const DEFAULT_MAX_BATCH_CHARACTERS = 12_000;
 const DEFAULT_CONTEXT_UNITS = 4;
@@ -30,7 +29,7 @@ function createSystemPrompt(targetLanguage = 'en') {
 4. 连贯：跨行语义要参考上下文，每个 text 仍只承载对应原行，不合并或拆分单元。
 目标书写要求：${script}
 
-严格规则：只翻译 units；context、title、artist 仅供理解。referenceTranslations 可能有误，原文始终优先。歌词实际已是目标语言及其目标书写形式时返回 {"notNeeded":true}，不要复制原文冒充译文。拉丁字母不等于英语，也不能仅凭字母猜测西班牙语、法语等；不确定时在同一次分析里保留未知。需要翻译时只返回 {"translations":[{"unitId":0,"text":"译文"}]}，与 units 等长，每个 unitId 恰好出现一次。不得输出时间戳、Markdown、署名、解释或多余段落。名字、口号与拟声可按目标语言语境保留，但不能把整份外语正文原样返回。`;
+严格规则：歌曲需要翻译已由上游独立确定，本角色只翻译，不重新判断语言或是否需要翻译。只处理 units；context、title、artist 仅供理解。referenceTranslations 可能有误，原文始终优先。返回且仅返回 JSON 对象 {"translations":[{"unitId":0,"text":"译文"}]}，与 units 等长，每个 unitId 恰好出现一次。不得返回songLanguage、unitLanguages、segments或notNeeded。不得输出时间戳、Markdown、署名、解释或多余段落，不修改原文或时间。名字、口号与拟声可按目标语言语境保留，但不能把整份外语正文原样返回。`;
 }
 
 export function buildTranslationPrompt(
@@ -118,7 +117,7 @@ function parseJsonResponse(aiResponse) {
   }
 }
 
-export function parseTranslationResponse(aiResponse, expectedUnits, { targetLanguage = 'zh', allowUnchanged = false } = {}) {
+export function parseTranslationResponse(aiResponse, expectedUnits, { targetLanguage = 'zh', allowUnchanged = false, allowEmptyUnitIds = new Set() } = {}) {
   if (!Array.isArray(expectedUnits) || expectedUnits.length === 0) throw new Error('NO_TRANSLATABLE_LINES');
   let parsedJson = parseJsonResponse(aiResponse);
   if (Array.isArray(parsedJson)) parsedJson = { translations: parsedJson };
@@ -149,7 +148,7 @@ export function parseTranslationResponse(aiResponse, expectedUnits, { targetLang
     const text = item.text.trim();
     const sourceText = expectedById.get(item.unitId).text;
     const maximumLength = Math.max(240, sourceText.length * 8);
-    if (!text || text.length > maximumLength || /[\r\n]/u.test(text)
+    if ((!text && !allowEmptyUnitIds.has(item.unitId)) || text.length > maximumLength || /[\r\n]/u.test(text)
       || LRC_TIMESTAMP_ANY_PATTERN.test(text) || /```/.test(text)) {
       throw new Error('INVALID_TRANSLATION_TEXT');
     }
@@ -157,38 +156,27 @@ export function parseTranslationResponse(aiResponse, expectedUnits, { targetLang
   }
 
   const ordered = expectedUnits.map(unit => translatedById.get(unit.unitId));
-  if (targetScriptEvidence(ordered.join('\n'), targetLanguage) === 'mismatch') throw new Error('TARGET_LANGUAGE_MISMATCH');
+  const translatedBody = ordered.filter(Boolean).join('\n');
+  if (translatedBody && targetScriptEvidence(translatedBody, targetLanguage) === 'mismatch') throw new Error('TARGET_LANGUAGE_MISMATCH');
   if (!allowUnchanged && isUnchangedTranslation(expectedUnits.map(unit => unit.text), ordered)) throw new Error('UNCHANGED_TRANSLATION');
   return [...translatedById].map(([unitId, text]) => ({ unitId, text }));
 }
 
 export function parseLanguageAwareTranslationResponse(aiResponse, expectedUnits, options = {}) {
   const parsed = parseJsonResponse(aiResponse);
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return { translations: parseTranslationResponse(parsed, expectedUnits, options), language: null,
-      discardLineIndices: [] };
-  }
-  const { songLanguage, translationLanguage, discardLineIndices, ...translationResponse } = parsed;
-  if (translationLanguage !== undefined && normalizeTranslationTarget(translationLanguage) !== normalizeTranslationTarget(options.targetLanguage || 'zh')) throw new Error('TARGET_LANGUAGE_MISMATCH');
-  const language = isValidSongLanguage(songLanguage) && songLanguage !== 'instrumental'
-    && songLanguage !== 'other' ? songLanguage : null;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)
+    || Object.keys(parsed).some(key => !['translations', 'discardLineIndices'].includes(key))) throw new Error('INVALID_RESPONSE_FIELDS');
+  const { discardLineIndices, ...translationResponse } = parsed;
   const allowed = options.allowedCleanupIndices;
-  const validCandidates = Array.isArray(discardLineIndices) && allowed
-    && discardLineIndices.every((index) => Number.isInteger(index) && allowed.has(index));
-  let translations;
-  try { translations = parseTranslationResponse(translationResponse, expectedUnits, options); }
-  catch (error) {
-    const target = normalizeTranslationTarget(options.targetLanguage || 'zh');
-    const sameSpokenLanguage = language === target || language === 'zh' && target === 'zh-Hant';
-    if (error.message !== 'UNCHANGED_TRANSLATION' || !sameSpokenLanguage
-      || targetScriptEvidence(expectedUnits.map(unit => unit.text).join('\n'), target) === 'mismatch') throw error;
-    // Same-request AI language evidence may establish that copied text already
-    // is the target. Return a no-op, never advertise the copy as translation.
-    translations = null;
+  if (discardLineIndices !== undefined && (!allowed || !Array.isArray(discardLineIndices)
+    || discardLineIndices.some(index => !Number.isInteger(index) || !allowed.has(index)))) throw new Error('INVALID_CLEANUP_INDICES');
+  const discard = [...new Set(discardLineIndices || [])].sort((a, b) => a - b);
+  if (options.analysisOnly) {
+    if (Object.keys(translationResponse).length) throw new Error('INVALID_RESPONSE_FIELDS');
+    return { translations: null, discardLineIndices: discard };
   }
-  return { translations, language,
-    discardLineIndices: validCandidates ? [...new Set(discardLineIndices)].sort((a, b) => a - b) : [] };
-
+  if (!Object.hasOwn(translationResponse, 'translations')) throw new Error('INVALID_COVERAGE');
+  return { translations: parseTranslationResponse(translationResponse, expectedUnits, options), discardLineIndices: discard };
 }
 
 export function reconstructTranslatedLrc(aiResponse, parsedLines) {

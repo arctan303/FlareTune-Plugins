@@ -60,6 +60,9 @@ export function item(node, fallback = {}) {
   const cover = coverImage(images, fallback.cover_url);
   const base = { id: kind === 'song' ? songId(rawId) : kind === 'artist' ? artistId(rawId) : albumId(rawId),
     source: 'youtube', sourceId: rawId, kind, title, artist: author, artists,
+    // Keep SDK classification separate from playable identity. An eleven-character
+    // ID alone does not distinguish an audio track from a music video.
+    item_type: ['song', 'video', 'unknown'].includes(node.item_type) ? node.item_type : null,
     album: node.album?.name || fallback.album || '',
     albumId: album(node.album?.id) ? albumId(node.album.id) : fallback.albumId || null,
     duration: node.duration?.seconds ?? (typeof node.duration === 'number' ? node.duration : fallback.duration ?? null),
@@ -72,10 +75,14 @@ export function shelf(section) {
   return { title: safeText(section.title || section.header?.title), type: section.type,
     items: Array.from(section.contents || []).map(node => item(node)).filter(Boolean) };
 }
-export function searchResult(result) {
+export function searchResult(result, { filter = 'all' } = {}) {
   // Initial searches contain shelves; SDK continuations expose one shelf.
   const contents = result.contents;
-  const sections = Array.isArray(contents) ? contents.map(shelf) : contents?.contents ? [shelf(contents)] : [];
+  const rawSections = Array.isArray(contents) ? contents.map(shelf) : contents?.contents ? [shelf(contents)] : [];
+  // Apply the explicit song intent before pagination counts candidates. Unknown
+  // upstream types remain playable; all/video searches and artist shelves retain videos.
+  const sections = filter === 'song' ? rawSections.map(section => ({ ...section,
+    items: section.items.filter(value => value.item_type !== 'video') })) : rawSections;
   const items = sections.flatMap(s => s.items);
   return { sections, items, songs: items.filter(n => n.kind === 'song'), artists: items.filter(n => n.kind === 'artist'),
     albums: items.filter(n => n.kind === 'album'), hasMore: Boolean(result.has_continuation) };
