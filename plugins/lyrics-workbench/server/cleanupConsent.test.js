@@ -45,11 +45,11 @@ const settings = { onlineEnabled: true, lyricPreference: 'word', provider: 'deep
   temperature: 0.2, styleRules: '', targetLanguage: 'zh', cleanDirtyLyrics: true, translateLyrics: true,
   detectLanguage: true, referenceExistingTranslation: false, completionEnabled: true, automaticCompletionEnabled: true };
 
-async function requestFixture({ role = 'admin', action = 'draft-ai', body, review = false } = {}) {
+async function requestFixture({ role = 'admin', action = 'draft-ai', body, review = false, completion = null, draftFailure } = {}) {
   const original = { source: 'manual', format: 'lrc', syncMode: 'line',
     lines: [{ time: 1, text: 'Lyrics by Fixture' }, { time: 2, text: 'The morning comes again' }] };
   let asset = { schemaVersion: 1, songId: song.id, status: 'ready', textHash: 'a'.repeat(64), original,
-    translation: null, aiCompletion: review ? { status: 'review', candidateIndices: [0], reviewAccountId: 'owner' } : null,
+    translation: null, aiCompletion: completion || (review ? { status: 'review', candidateIndices: [0], reviewAccountId: 'owner' } : null),
     offsetMs: 0, provenance: {}, updatedAt: new Date().toISOString() };
   let writes = 0, called;
   const store = { get: async () => ({ state: 'found', artifact: structuredClone(asset), etag: 'v1' }),
@@ -64,7 +64,7 @@ async function requestFixture({ role = 'admin', action = 'draft-ai', body, revie
     { mode: 'normal', account: { accountId: 'owner', role } }, {}, { song, store,
       context: { requireRoles: async () => {} }, aiAvailable: async () => true,
       beginCompletion: async options => { called = options; return { state: 'not_needed' }; },
-      completeDraft: async options => { called = options; return { status: 'ready', lines: options.lines }; },
+      completeDraft: async options => { called = options; return draftFailure ? { status: 'failed', errorCode: draftFailure } : { status: 'ready', lines: options.lines }; },
       aiDeps: { loadLyricAiConfig: async () => settings,
         aiAccess: { db, lease: {}, config: { ...settings }, client: { assertCurrent: async () => {},
           ask: () => assert.fail('Consent probes must never call a model') } } } });
@@ -80,6 +80,20 @@ for (const role of ['member', 'admin']) {
     assert.equal(f.writes, 0);
   });
 }
+
+test('workspace asset and draft failure responses hide internal budget scopes without rewriting the stored asset', async () => {
+  for (const errorCode of ['request_budget_exhausted_' + 'a'.repeat(32), 'request_budget_retry_exhausted_' + 'b'.repeat(32)]) {
+    for (const role of ['member', 'admin']) {
+      const f = await requestFixture({ role, action: '', completion: { status: 'failed', errorCode, updatedAt: new Date().toISOString() } });
+      assert.equal(f.response.status, 200); assert.equal(f.payload.data.asset.aiCompletion.errorCode, 'request_budget_exhausted');
+      assert.doesNotMatch(JSON.stringify(f.payload), /request_budget_(?:retry_)?exhausted_[a-f0-9]{32}/u);
+      assert.equal(f.asset.aiCompletion.errorCode, errorCode); assert.equal(f.writes, 0);
+    }
+    const draft = await requestFixture({ draftFailure: errorCode });
+    assert.equal(draft.response.status, 503); assert.equal(draft.payload.message, 'request_budget_exhausted');
+    assert.doesNotMatch(JSON.stringify(draft.payload), /request_budget_(?:retry_)?exhausted_[a-f0-9]{32}/u);
+  }
+});
 test('admin draft defaults to translation without cleanup even when legacy policy enabled cleanup', async () => {
   const f = await requestFixture();
   assert.equal(f.response.status, 200);

@@ -15,6 +15,7 @@ import {
 } from "@flaretune/plugin-sdk/server/lyric-workflow";
 
 import { dominantLyricTranslationNeed, buildLanguageAssessmentPrompt, parseLanguageAssessmentResponse, lyricLanguageTag } from './languageAssessment.js';
+import { automaticBudgetRetry, budgetFailureCode, budgetFailureState, budgetRetryScope } from './automaticRetry.js';
 export { dominantLyricTranslationNeed } from './languageAssessment.js';
 
 const DEFAULT_DAILY_LIMIT = 50;
@@ -380,7 +381,7 @@ async function prepareLanguage({ env, db, song, store, initialRead: read, effect
 }
 
 export async function runLyricAssetAiCompletion({ env, db, song, store, startedAt, textHash,
-  actorAccountId = null, force = false, deps = {} }) {
+  actorAccountId = null, force = false, retryContext = null, deps = {} }) {
   let access, lease, completionSnapshot;
   try {
     lease = deps.aiAccess?.lease || deps.aiLease || await createLyricsAiLease({ env,
@@ -393,7 +394,8 @@ export async function runLyricAssetAiCompletion({ env, db, song, store, startedA
   } catch (error) {
     try { await lease.assertCurrent(); } catch { return { state: 'superseded' }; }
     return conditionallyFinish(guardLyricsStore(store, lease.assertCurrent), song.id, startedAt, textHash,
-      current => ({ ...current, aiCompletion: { status: 'failed', errorCode: safeErrorCode(error),
+      current => ({ ...current, aiCompletion: { status: 'failed', errorCode: safeErrorCode(error) === 'request_budget_exhausted'
+        ? budgetFailureCode(retryContext || {}) : safeErrorCode(error),
         updatedAt: new Date((deps.now || Date.now)()).toISOString() } }));
   }
   db = access.db;
@@ -481,8 +483,10 @@ export async function runLyricAssetAiCompletion({ env, db, song, store, startedA
     access.budget?.settle();
     try { await access.client.assertCurrent(); } catch { return { state: 'superseded' }; }
     const failedAt = new Date((deps.now || Date.now)()).toISOString();
+    const failureCode = access.budget?.depleted ? 'request_budget_exhausted' : safeErrorCode(error);
     const failed = await conditionallyFinish(store, song.id, startedAt, textHash, current => ({ ...current,
-      aiCompletion: { status: 'failed', errorCode: access.budget?.depleted ? 'request_budget_exhausted' : safeErrorCode(error), updatedAt: failedAt }, updatedAt: failedAt }), completionSnapshot);
+      aiCompletion: { status: 'failed', errorCode: failureCode === 'request_budget_exhausted'
+        ? budgetFailureCode(retryContext || {}) : failureCode, updatedAt: failedAt }, updatedAt: failedAt }), completionSnapshot);
     const diagnostic = !access.budget?.depleted && safeLyricValidationDiagnostic(validationFailures.get(error));
     return failed.state === 'updated' && diagnostic ? { ...failed, diagnostic } : failed;
   }
@@ -529,11 +533,18 @@ export async function beginLyricAssetAiCompletion({
   }
 
   if (access.config.completionEnabled === false) return { state: 'unavailable', artifact: current.artifact, etag: current.etag, task: null };
-  // One request owns one pending claim across classification and translation.
+  // Resolve the actual saved model before comparing scope, but do not prepare
+  // language, reserve quota or mutate the asset until this gate permits work.
+  const retryScope = await budgetRetryScope({ artifact: current.artifact, song, targetLanguage: effectiveTarget,
+    config: access.config, identity: access.client.identity });
+  const retry = automaticBudgetRetry({ completion: current.artifact.aiCompletion, scope: retryScope, automatic, now });
+  if (!retry.allowed) return { state: 'failed', song, artifact: current.artifact, etag: current.etag, task: null };
+  // One request owns one pending claim across preparation and translation.
   // Keep that claim while recording the assessment instead of settling it and
   // immediately issuing an identical second pending write.
   let classificationClaim = null;
-  if (dominantLyricTranslationNeed(current.artifact, song, { targetLanguage: effectiveTarget }).state === 'unknown') {
+  if (budgetFailureState(current.artifact.aiCompletion) || current.artifact.aiCompletion?.status === 'pending'
+    || dominantLyricTranslationNeed(current.artifact, song, { targetLanguage: effectiveTarget }).state === 'unknown') {
     const claimedAt = new Date((deps.now || Date.now)()).toISOString();
     access.budget?.requireSettlementRoom();
     const claimed = await store.putIfMatch(song.id, { ...current.artifact,
@@ -565,6 +576,8 @@ export async function beginLyricAssetAiCompletion({
     }
     return { state: 'not_needed', song, artifact: current.artifact, etag: current.etag, task: null };
   }
+  const retryContext = { consumed: retry.consumed, scope: await budgetRetryScope({ artifact: current.artifact,
+    song, targetLanguage: effectiveTarget, config: access.config, identity: access.client.identity }) };
   const startedAt = classificationClaim?.startedAt || new Date((deps.now || Date.now)()).toISOString();
   const pending = {
     ...current.artifact,
@@ -598,6 +611,7 @@ export async function beginLyricAssetAiCompletion({
       textHash: written.artifact.textHash,
       actorAccountId,
       force,
+      retryContext,
       deps: { ...deps, aiAccess: access, initialRead: { ...written, state: 'found' } },
     }),
   };

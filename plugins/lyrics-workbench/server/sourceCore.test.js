@@ -56,7 +56,9 @@ function setup({ initial = null, candidate = document(), config = {}, available 
     operations: {
       settings: async () => settings, assertCurrent: async () => { calls.authority++; }, createDocument: x => structuredClone(x),
       buildArtifact: async (_song, doc) => ({ artifact: asset(doc) }),
-      project: value => ({ translation: projectTranslation(value), translationState: value.aiCompletion?.status === 'pending' ? 'pending' : value.aiCompletion?.status === 'failed' ? 'failed' : 'missing' }),
+      project: value => ({ translation: projectTranslation(value), translationState: value.aiCompletion?.status === 'pending'
+        && Date.now() - Date.parse(value.aiCompletion.updatedAt) < 30_000 ? 'pending'
+        : ['pending', 'failed'].includes(value.aiCompletion?.status) ? 'failed' : 'missing' }),
       resolveTranslationNeed: translationNeed,
       hasNoTranslationDecision: (artifact, _song, { targetLanguage }) => artifact.translationDecision?.status === 'not_needed'
         && artifact.translationDecision.textHash === artifact.textHash && artifact.translationDecision.targetLanguage === targetLanguage,
@@ -374,6 +376,31 @@ test('a new-policy generation failure is not retried on each read but can be ret
   await (await f.source.resolve(song)).onAdopt(); assert.equal(f.calls.ai, 0);
   const started = await f.source.translate({ songId: song.id, textHash: initial.textHash });
   assert.equal(started.translation.state, 'pending'); assert.equal(f.calls.ai, 1);
+});
+
+test('budget failures reach the central gate without language preparation, and public codes omit retry scope', async () => {
+  for (const errorCode of ['request_budget_exhausted', 'request_budget_exhausted_' + 'a'.repeat(32),
+    'request_budget_retry_exhausted_' + 'a'.repeat(32)]) {
+    const initial = asset(document('manual'));
+    initial.aiCompletion = { status: 'failed', errorCode, updatedAt: new Date().toISOString() };
+    initial.translationDecision = { status: 'needed', policyVersion: 2, textHash: initial.textHash, targetLanguage: 'zh' };
+    let starts = 0;
+    const f = setup({ initial, prepareLanguage: () => assert.fail('failed retries must be gated before language preparation'),
+      beginCompletion: async input => { starts++; assert.equal(input.automatic, true); return { ...input.deps.initialRead, task: null }; } });
+    const adopted = await (await f.source.resolve(song)).onAdopt();
+    assert.equal(adopted.translation.state, 'failed'); assert.equal(adopted.translation.error.code, 'request_budget_exhausted');
+    assert.equal(starts, 1); assert.equal(f.calls.language, 0); assert.equal(f.calls.ai, 0); assert.equal(f.store.calls.put, 0);
+    assert.equal((await f.store.get()).artifact.aiCompletion.errorCode, errorCode);
+  }
+});
+
+test('a stale pending original cannot re-enter classification from an ordinary read', async () => {
+  const initial = asset(document('manual'));
+  initial.aiCompletion = { status: 'pending', updatedAt: new Date(Date.now() - 60_000).toISOString() };
+  const f = setup({ initial, prepareLanguage: () => assert.fail('stale pending must not start classification') });
+  const result = await (await f.source.resolve(song)).onAdopt();
+  assert.equal(result.translation.state, 'failed'); assert.deepEqual(result.document.lines, initial.original.lines);
+  assert.equal(f.calls.language, 0); assert.equal(f.calls.ai, 0); assert.equal(f.store.calls.put, 0);
 });
 
 test('a legacy generation failure can enter the new language flow once', async () => {

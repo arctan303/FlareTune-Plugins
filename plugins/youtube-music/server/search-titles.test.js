@@ -10,7 +10,7 @@ const stubs = {
   '@flaretune/plugin-sdk/server/music-catalog': 'export const handleLocalMusicReadRoute=()=>{throw Error("inject local")};',
   '@flaretune/plugin-sdk/server/album-catalog': 'export const handleLocalAlbumReadRoute=()=>{throw Error("inject local")};',
   '@flaretune/plugin-sdk/server/catalog-discovery': 'export const handleLocalMusicDiscoveryRoute=()=>{};',
-  '@flaretune/plugin-sdk/server/http-security': 'export const readBoundedJson=()=>{};',
+  '@flaretune/plugin-sdk/server/http-security': 'export const readBoundedJson=request=>request.json();',
   '@flaretune/plugin-sdk/server/lyric-document': 'export const createLyricDocument=x=>x;',
   '@flaretune/plugin-sdk/server/external-music-references': 'export const externalMusicSchemaReady=async()=>false; export const loadExternalSongs=async()=>[]; export const prepareExternalSongs=()=>{};',
   './connection.js': 'export const YOUTUBE_CONNECTION_KEY="plugin.youtube-music.connection"; export const getYouTubeBinding=()=>{throw Error("inject access")};',
@@ -39,17 +39,17 @@ function fixture(count = 5) {
       calls.push(url.searchParams.get('url').split('=').at(-1));
       return Response.json({ provider_name: 'YouTube', type: 'video', title: '发布原名' + calls.at(-1) });
     } } });
-  const read = async (path, assertCurrent = async () => {}) => {
-    const request = new Request('https://test.example' + path), url = new URL(request.url);
+  const read = async (path, assertCurrent = async () => {}, body, serviceOverride) => {
+    const request = new Request('https://test.example' + path, body ? { method: 'POST', body: JSON.stringify(body) } : {}), url = new URL(request.url);
     return handleYouTubeMusicRoute(request, url, {}, { mode: 'normal', account: { accountId: 'owner' } }, {}, {
       localRead: async () => Response.json({ code: 200, data: { songs: [local], artists: [], albums: [], hasMore: false } }),
-      getAccess: async () => ({ service, assertCurrent }),
+      getAccess: async () => ({ service: serviceOverride || service, assertCurrent }),
     });
   };
   return { service, read, calls, searches };
 }
 
-test('HTTP display enrichment is sliced to this page and never changes cached song/lyric metadata or local results', async () => {
+test('HTTP title serves existing clients while cached song/lyric metadata and local results stay intact', async () => {
   const f = fixture();
   const before = await f.service.search('fixture', { filter: 'song', limit: 2, offset: 1 });
   const original = JSON.parse(JSON.stringify(before.songs));
@@ -57,11 +57,48 @@ test('HTTP display enrichment is sliced to this page and never changes cached so
   const data = (await response.json()).data;
   assert.equal(response.status, 200); assert.deepEqual(data.songs[0], local);
   assert.deepEqual(f.calls, ['track000001', 'track000002']);
-  assert.deepEqual(data.songs.slice(1).map(({ displayTitle, ...rest }) => rest), original.slice(1, 3));
+  assert.deepEqual(data.songs.slice(1).map(({ displayTitle, ...rest }, i) => ({ ...rest, title: original[i + 1].title })), original.slice(1, 3));
   assert.ok(data.songs.slice(1).every(song => song.displayTitle.startsWith('发布原名')));
+  assert.ok(data.songs.slice(1).every(song => song.title === song.displayTitle));
   assert.deepEqual(before.songs, original);
   assert.equal((await f.service.song('track000001')).title, original[1].title);
   assert.equal(data.nextOffset, 3); assert.equal(data.hasMore, true);
+});
+
+test('song detail and restored queue return the same publisher title to title-only clients', async () => {
+  const f = fixture(7);
+  await f.service.search('restore-title', { filter: 'song' });
+  const raw = (await f.service.song('track000000')).title;
+  const search = (await (await f.read('/api/songs/search?q=restore-title&limit=2')).json()).data.songs[1];
+  const detail = (await (await f.read('/api/songs/yt%3Atrack000000')).json()).data;
+  const restored = (await (await f.read('/api/songs/resolve', undefined, { song_ids: ['yt:track000000'] })).json()).data.songs[0];
+  assert.equal(search.title, detail.title);
+  assert.equal(search.title, restored.title);
+  assert.notEqual(search.title, raw);
+  assert.equal((await f.service.song('track000000')).title, raw);
+});
+
+test('album and artist song rows use publisher names without mutating source metadata', async () => {
+  const f = fixture(8);
+  const raw = (await f.service.search('detail-title', { filter: 'song' })).songs;
+  const service = { ...f.service, album: async () => ({ title: 'Album', songs: raw }),
+    artist: async () => ({ name: 'Artist', songs: raw, hasMore: false }) };
+  for (const path of ['/api/albums/yt%3Aalbum%3AMPREb_fixture', '/api/artists/yt%3Aartist%3AUCfixture']) {
+    const data = (await (await f.read(path, undefined, undefined, service)).json()).data;
+    assert.deepEqual(data.songs.map(song => song.id), raw.map(song => song.id));
+    assert.ok(data.songs.every(song => song.title === song.displayTitle));
+  }
+  assert.ok(raw.every(song => song.title.includes(' - Original ')));
+});
+
+test('missing publisher data preserves the complete title including the version', async () => {
+  const song = { id: 'yt:track000009', source: 'youtube', title: 'Come Into My World (Extended Version)' };
+  const request = new Request('https://test.example/api/songs/search?q=version');
+  const response = await handleYouTubeMusicRoute(request, new URL(request.url), {}, { mode: 'normal', account: { accountId: 'owner' } }, {}, {
+    localRead: async () => Response.json({ code: 200, data: { songs: [] } }),
+    getAccess: async () => ({ service: { search: async () => ({ songs: [song] }), projectSearchDisplayTitles: async songs => songs }, assertCurrent: async () => {} }),
+  });
+  assert.deepEqual((await response.json()).data.songs, [song]);
 });
 
 test('connection retirement after name fetch discards the remote page before returning', async () => {

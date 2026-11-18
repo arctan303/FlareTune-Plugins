@@ -1,4 +1,5 @@
 import { translationLanguageMatches } from '../shared/translation-languages.js';
+import { budgetFailureState, publicBudgetErrorCode } from './automaticRetry.js';
 const DEFAULT_SETTINGS = Object.freeze({ onlineEnabled: true, lyricPreference: 'word', targetLanguage: 'en', completionEnabled: true });
 const readyArtifact = read => read?.artifact?.status === 'ready' ? read.artifact : null;
 export const isProtectedWorkbenchArtifact = artifact => artifact?.original?.source === 'manual' || artifact?.provenance?.evaluation === 'manual';
@@ -53,7 +54,7 @@ export function createWorkbenchSourceCore({ env, db, session, executionContext, 
         source: valid ? translation.source : available ? 'ai' : null,
         kind: valid ? translation.kind || (translation.source === 'ai' ? 'ai' : translation.source === 'manual' ? 'manual' : 'provider') : available ? 'ai' : null,
         lines: valid ? [...translation.lines] : [],
-        ...(state === 'failed' ? { error: operations.translationError(artifact.aiCompletion?.errorCode || 'completion_failed') } : {}) },
+        ...(state === 'failed' ? { error: operations.translationError(publicBudgetErrorCode(artifact.aiCompletion?.errorCode || 'completion_failed')) } : {}) },
       provenance: { ...artifact.provenance, originalSource: artifact.provenance?.originalSource || artifact.original.source },
       sourceRef: { targetLanguage: config.targetLanguage }, ...(onAdopt ? { onAdopt } : {}) };
   };
@@ -68,6 +69,10 @@ export function createWorkbenchSourceCore({ env, db, session, executionContext, 
     const cachedNoOp = operations.hasNoTranslationDecision(read.artifact, song, { targetLanguage: config.targetLanguage });
     if (result.translation.state === 'not_needed' && cachedNoOp
       || !result.translation.supported && result.translation.state !== 'not_needed') return result;
+    // A stale pending record has lost its retry scope. Keep the original and
+    // require an explicit action instead of restarting language preparation.
+    if (automatic && read.artifact.aiCompletion?.status === 'pending') return result;
+    const budgetFailure = Boolean(budgetFailureState(read.artifact.aiCompletion));
     // An unknown-language failure is not a no-translation decision. Ordinary
     // reads retain its retryable status; the owning-source POST may retry it.
     if (automatic && result.translation.state === 'failed'
@@ -82,7 +87,7 @@ export function createWorkbenchSourceCore({ env, db, session, executionContext, 
     // pending claim to generation. A separate prepare here would settle and
     // immediately recreate that claim. Existing failures/no-ops still need
     // their decision cache reconciled before considering automatic work.
-    if (operations.prepareLanguage && result.translation.state !== 'idle') {
+    if (operations.prepareLanguage && result.translation.state !== 'idle' && !budgetFailure) {
       const prepared = await operations.prepareLanguage({ env, db, song, store,
         actorAccountId: session?.account?.accountId || context?.identity?.accountId,
         targetLanguage: config.targetLanguage,
@@ -97,7 +102,7 @@ export function createWorkbenchSourceCore({ env, db, session, executionContext, 
     // A freshly prepared policy decision clears only obsolete pre-1.0 failures.
     // New generation failures remain visible until POST, without a read loop.
     if (automatic && result.translation.state === 'failed'
-      && read.artifact.aiCompletion?.errorCode !== 'request_budget_exhausted') return result;
+      && !budgetFailure) return result;
     const started = await operations.beginCompletion({ env, db, song, store,
       actorAccountId: session?.account?.accountId || context?.identity?.accountId,
       force: false, targetLanguage: config.targetLanguage, automatic,

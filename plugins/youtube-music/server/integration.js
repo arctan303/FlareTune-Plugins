@@ -165,6 +165,15 @@ async function rememberPlayedReference(env, session, ctx, access, id) {
   if (prepared.statements.length) await env.DB.batch(prepared.statements);
 }
 
+// Older clients consume title directly. Project public publisher names only at
+// the HTTP boundary; keep the Music metadata cache used by playback/lyrics intact.
+async function presentSongTitles(access, songs, signal) {
+  const projected = typeof access.service.projectSearchDisplayTitles === 'function'
+    ? await access.service.projectSearchDisplayTitles(songs, { signal }) : songs;
+  return projected.map(song => song?.source === 'youtube' && typeof song.displayTitle === 'string' && song.displayTitle.trim()
+    ? { ...song, title: song.displayTitle } : song);
+}
+
 export async function handleYouTubeMusicRoute(request, url, env, session, ctx, options = {}) {
   const getAccess = options.getAccess || createYouTubeAccess;
   const path = url.pathname;
@@ -198,9 +207,7 @@ export async function handleYouTubeMusicRoute(request, url, env, session, ctx, o
         filter: field === 'songs' ? 'song' : field === 'artists' ? 'artist' : 'album', hl: languageOf(url), ...page });
       remote = (result[field] || []).slice(page.offset, page.offset + page.limit);
       remoteHasMore = Boolean(result.hasMore);
-      if (field === 'songs' && typeof access.service.projectSearchDisplayTitles === 'function') {
-        remote = await access.service.projectSearchDisplayTitles(remote, { signal: request.signal });
-      }
+      if (field === 'songs') remote = await presentSongTitles(access, remote, request.signal);
       await access.assertCurrent();
     } catch (error) {
       if (inactiveCodes.has(codeOf(error))) return json(payload);
@@ -241,8 +248,9 @@ export async function handleYouTubeMusicRoute(request, url, env, session, ctx, o
         const values = await Promise.allSettled(ytIds.slice(at, at + 4).map(id => access.service.song(id.slice(3))));
         for (const value of values) if (value.status === 'fulfilled' && ytIds.includes(value.value?.id)) live.set(value.value.id, value.value);
       }
+      const presented = await presentSongTitles(access, [...live.values()], request.signal);
       await access.assertCurrent();
-      for (const [id, song] of live) found.set(id, song);
+      for (const song of presented) found.set(song.id, song);
     } catch { /* Keep only account-owned snapshots when live authority is unavailable. */ }
     return success({ songs: ids.map(id => found.get(id)).filter(Boolean), missing_ids: ids.filter(id => !found.has(id)) });
   }
@@ -258,6 +266,8 @@ export async function handleYouTubeMusicRoute(request, url, env, session, ctx, o
       total: songs.length, songCount: songs.length, hasMore: Boolean(result.hasMore),
       nextOffset: page.offset + page.limit };
   } else fail('invalid_input', 400);
+  if (detail[1] === 'songs') [data] = await presentSongTitles(access, [data], request.signal);
+  else if (Array.isArray(data.songs)) data = { ...data, songs: await presentSongTitles(access, data.songs, request.signal) };
   await access.assertCurrent();
   return success(data);
 }

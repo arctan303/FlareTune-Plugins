@@ -24,6 +24,7 @@ import {
   LYRIC_TRANSLATION_POLICY_VERSION,
 } from "@flaretune/plugin-sdk/server/lyric-workflow";
 import { beginLyricAssetAiCompletion, safeLyricValidationDiagnostic } from "./translation.js";
+import { publicBudgetErrorCode, publicRetryArtifact } from './automaticRetry.js';
 import { completeLyricDraft } from "./draftAi.js";
 import { verifyLyricDraftReceiptData } from "./draftReceipt.js";
 import { loadLyricAiConfig, loadLyricAiProcessingSettings } from "./config.js";
@@ -108,7 +109,7 @@ function currentData(read, song, now, targetLanguage = null, viewerAccountId = n
   const asset = read.artifact.aiCompletion?.status === 'review'
     && read.artifact.aiCompletion.reviewAccountId !== viewerAccountId
     ? { ...read.artifact, aiCompletion: null } : read.artifact;
-  return { status: read.artifact.status, etag: read.etag, asset,
+  return { status: read.artifact.status, etag: read.etag, asset: publicRetryArtifact(asset),
     lyrics: projectLyricArtifact(read.artifact, { song, now, targetLanguage }) };
 }
 
@@ -532,7 +533,7 @@ export async function handleLyricsWorkbenchRoute(request, url, db, headers = {},
       }
       if (result.status !== 'ready') {
         const diagnostic = safeLyricValidationDiagnostic(result.diagnostic);
-        return failure(503, 'LYRIC_AI_FAILED', result.errorCode || 'AI completion failed', headers,
+        return failure(503, 'LYRIC_AI_FAILED', publicBudgetErrorCode(result.errorCode) || 'AI completion failed', headers,
           diagnostic ? { diagnostic: { code: diagnostic.validationCode, stage: diagnostic.stage,
             ...(diagnostic.batchIndex === undefined ? {} : { batch: diagnostic.batchIndex }) } } : undefined);
       }
