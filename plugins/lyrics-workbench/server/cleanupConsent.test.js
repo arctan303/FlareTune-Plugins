@@ -4,7 +4,7 @@ import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 import { completionCapabilities } from './translation.fixture.js';
 
-const capabilities = completionCapabilities + String.raw`
+const capabilities = completionCapabilities + `export { jsonTaskResponse } from ${JSON.stringify(fileURLToPath(new URL('../../../../server/server/src/services/jsonTaskResponse.js', import.meta.url)).replaceAll('\\', '/'))};\n` + String.raw`
 export const LYRIC_TRANSLATION_POLICY_VERSION = 2;
 export class LyricSourceError extends Error {}
 export class LyricArtifactStoreError extends Error {}
@@ -26,6 +26,7 @@ export const lyricSourceLoaderForDb = unused;
 export const inspectLyricCandidates = unused;
 export const LYRIC_CANDIDATE_INSPECTION_LIMITS = { maxResponseBytes: 100000, maxCandidates: 10 };
 export const readBoundedJson = request => request.json();
+export const MAX_LYRIC_ARTIFACT_BYTES = 4 * 1024 * 1024;
 export const guardExternalLyricStore = x => x;
 export const isExternalLyricSongId = x => x.startsWith('yt:');
 export const lyricSongStillExists = async () => true;
@@ -37,7 +38,7 @@ export const pluginFail = unused;
 const bundled = await build({ entryPoints: [fileURLToPath(new URL('./workspace.js', import.meta.url))],
   bundle: true, write: false, format: 'esm', platform: 'node', plugins: [{ name: 'cleanup-consent-capabilities', setup(api) {
     api.onResolve({ filter: /^@flaretune\// }, args => ({ path: args.path, namespace: 'capabilities' }));
-    api.onLoad({ filter: /.*/, namespace: 'capabilities' }, () => ({ contents: capabilities, loader: 'js' }));
+    api.onLoad({ filter: /.*/, namespace: 'capabilities' }, () => ({ contents: capabilities, loader: 'js', resolveDir: fileURLToPath(new URL('.', import.meta.url)) }));
   } }] });
 const { handleLyricsWorkbenchRoute } = await import('data:text/javascript;base64,' + Buffer.from(bundled.outputFiles[0].text).toString('base64'));
 const song = { id: 'yt:abcdefghijk', title: 'Fixture', artist: 'Singer', language: 'en' };
@@ -90,7 +91,7 @@ test('workspace asset and draft failure responses hide internal budget scopes wi
       assert.equal(f.asset.aiCompletion.errorCode, errorCode); assert.equal(f.writes, 0);
     }
     const draft = await requestFixture({ draftFailure: errorCode });
-    assert.equal(draft.response.status, 503); assert.equal(draft.payload.message, 'request_budget_exhausted');
+    assert.equal(draft.response.status, 200); assert.equal(draft.payload.code, 503); assert.equal(draft.payload.message, 'request_budget_exhausted');
     assert.doesNotMatch(JSON.stringify(draft.payload), /request_budget_(?:retry_)?exhausted_[a-f0-9]{32}/u);
   }
 });
@@ -108,13 +109,13 @@ test('admin may explicitly request cleanup for this draft without writing shared
   assert.equal(f.called.deps.aiAccess.config.cleanDirtyLyrics, true);
   assert.equal(f.writes, 0);
 });
-test('invalid cleanup consent and any member draft request are rejected before draft generation', async () => {
+test('invalid cleanup consent is rejected while a member can explicitly process a draft', async () => {
   for (const cleanDirtyLyrics of ['true', 1, null, {}]) {
     const f = await requestFixture({ body: { lines: [{ text: 'Hello' }], etag: 'v1', cleanDirtyLyrics } });
     assert.equal(f.response.status, 400); assert.equal(f.called, undefined); assert.equal(f.writes, 0);
   }
   const f = await requestFixture({ role: 'member', body: { lines: [{ text: 'Hello' }], etag: 'v1', cleanDirtyLyrics: true } });
-  assert.equal(f.response.status, 403); assert.equal(f.called, undefined); assert.equal(f.writes, 0);
+  assert.equal(f.response.status, 200); assert.equal(f.called.deps.lyricConfig.cleanDirtyLyrics, true); assert.equal(f.writes, 0);
 });
 for (const role of ['member', 'admin']) {
   test(`${role} reading an old cleanup review never applies its proposed deletions`, async () => {

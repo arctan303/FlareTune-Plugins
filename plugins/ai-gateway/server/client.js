@@ -88,7 +88,7 @@ export async function createAiGatewayClient(input, dependencies = {}) {
       try { await lease.assertCurrent(); }
       catch (error) { retired = true; controller.abort(); throw error; }
     };
-    const timer = dependencies.pollIntervalMs === 0 ? null : setInterval(() => {
+    const timer = lease.authorization === 'request' || dependencies.pollIntervalMs === 0 ? null : setInterval(() => {
       if (checking || retired) return;
       checking = true;
       void check().catch(() => {}).finally(() => { checking = false; });

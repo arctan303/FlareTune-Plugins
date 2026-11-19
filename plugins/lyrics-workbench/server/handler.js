@@ -8,8 +8,6 @@ import { testLyricSource } from "./sourceTest.js";
 import { handleLyricsModelRoute } from './modelRoutes.js';
 import { loadLyricAiProcessingSettings } from './config.js';
 
-const memberAction = (path, method) => method === 'GET'
-  || method === 'POST' && ['/candidates/inspect', '/ai-completion'].some(suffix => path.endsWith(suffix));
 export function createLyricsWorkbenchHandler(env, session, { executionContext, dependencies = {}, registry } = {}) {
   return async ({ request, path, scope, context, json }) => {
     if (scope === 'admin' && ['/model', '/model/models', '/model/initialize'].includes(path)) {
@@ -47,9 +45,8 @@ export function createLyricsWorkbenchHandler(env, session, { executionContext, d
       }
     }
     if (scope !== 'account' || !/^\/(?:sources$|workspace\/[^/]+(?:\/.*)?$)/u.test(path)) return null;
-    const roles = memberAction(path, request.method) ? ['admin', 'member'] : ['admin'];
     const lease = await createPluginOperationLease({ env, session, pluginId: 'lyrics-workbench', context,
-      registry, admin: roles.length === 1 });
+      registry, authorization: 'request' });
     const db = lease.guardedDb(env.DB);
     // The operation lease binds these exact roles in its SQL predicate.
     let assertScope = lease.assertCurrent;
@@ -61,7 +58,7 @@ export function createLyricsWorkbenchHandler(env, session, { executionContext, d
       ...dependencies, context: guardedContext, assertCurrent: current, registry,
       useAiLease: service => { assertScope = service.assertCurrent; },
       ctx: executionContext,
-      aiDeps: { ...dependencies.aiDeps, session, consumerContext: guardedContext, registry, signal: request.signal, admin: roles.length === 1 },
+      aiDeps: { ...dependencies.aiDeps, session, consumerContext: guardedContext, registry, signal: request.signal },
     });
     await current();
     return response;

@@ -15,7 +15,7 @@ async function bundleWithCapabilities(entry, capabilities) {
   const bundled = await build({ entryPoints: [fileURLToPath(new URL(entry, import.meta.url))],
     bundle: true, write: false, format: 'esm', platform: 'node', plugins: [{ name: 'diagnostic-capabilities', setup(api) {
       api.onResolve({ filter: /^@flaretune\// }, args => ({ path: args.path, namespace: 'capabilities' }));
-      api.onLoad({ filter: /.*/, namespace: 'capabilities' }, () => ({ contents: capabilities, loader: 'js' }));
+      api.onLoad({ filter: /.*/, namespace: 'capabilities' }, () => ({ contents: capabilities, loader: 'js', resolveDir: fileURLToPath(new URL('.', import.meta.url)) }));
     } }] });
   return import('data:text/javascript;base64,' + Buffer.from(bundled.outputFiles[0].text).toString('base64'));
 }
@@ -48,30 +48,26 @@ function assertArtifactFailure(f, errorCode = 'invalid_output', state = 'updated
   assert.equal(f.artifact.translation, null);
   assert.equal(f.artifact.diagnostic, undefined);
   assert.equal(f.artifact.validationCode, undefined);
-  if (f.artifact.translationDecision) {
-    assert.equal(f.artifact.translationDecision.status, 'needed');
-    assert.equal(f.artifact.translationDecision.textHash, f.artifact.textHash);
-    assert.equal(JSON.stringify(f.artifact.translationDecision).includes(secret), false);
-  }
+  assert.equal(f.artifact.translationDecision, undefined, 'failed output never publishes an intermediate decision');
 }
 
 test('local response validation returns a bounded diagnostic without persisting private error details', async () => {
   const f = await runFixture({ ask: async () => ({
     translations: [{ unitId: 99, text: secret }] }) });
   assertArtifactFailure(f);
-  assert.equal(f.artifact.translationDecision.status, 'needed');
-  assert.deepEqual(f.result.diagnostic, { validationCode: 'INVALID_TRANSLATION_INDEX', stage: 'validation', batchIndex: 0 });
+  assert.equal(f.artifact.translationDecision, undefined, 'Failed output never publishes an intermediate language decision');
+  assert.deepEqual(f.result.diagnostic, { validationCode: 'INVALID_TRANSLATION_INDEX', stage: 'validation' });
   assert.equal(JSON.stringify(f.result.diagnostic).includes(secret), false);
 });
 
-test('validation reports the actual later batch rather than the first successful batch', async () => {
+test('whole-song validation repairs once and never invents a batch diagnostic', async () => {
   const f = await runFixture({ texts: Array.from({ length: 41 }, (_, i) => `We sing verse ${i}`), ask: async messages => {
     const { units } = JSON.parse(messages.at(-1).content);
     return { translations: units.map(unit => ({ unitId: unit.unitId === 40 ? 999 : unit.unitId, text: '我们一起歌唱' })) };
   } });
   assertArtifactFailure(f);
   assert.equal(f.calls, 2);
-  assert.deepEqual(f.result.diagnostic, { validationCode: 'INVALID_TRANSLATION_INDEX', stage: 'validation', batchIndex: 1 });
+  assert.deepEqual(f.result.diagnostic, { validationCode: 'INVALID_TRANSLATION_INDEX', stage: 'validation' });
 });
 
 test('an empty sung body settles without generation or an invented validation failure', async () => {
@@ -87,7 +83,7 @@ test('an empty sung body settles without generation or an invented validation fa
 test('an invalid target in language preparation reports a safe setup diagnostic without invoking the model', async () => {
   const f = await runFixture({ settings: { ...config, targetLanguage: 'unknown-target' },
     ask: () => assert.fail('No generation for invalid target') });
-  assertArtifactFailure(f, 'language_assessment_failed', 'found');
+  assertArtifactFailure(f, 'invalid_output');
   assert.deepEqual(f.result.diagnostic, { validationCode: 'INVALID_TARGET_LANGUAGE', stage: 'setup' });
 });
 
@@ -124,11 +120,11 @@ test('draft failures carry only the bounded diagnostic and the established error
       aiAccess: { db: {}, lease: {}, config, client: { assertCurrent: async () => {}, ask: async () => ({
         translations: [{ unitId: 99, text: secret }] }) } } } });
   assert.deepEqual(result, { status: 'failed', errorCode: 'invalid_output',
-    diagnostic: { validationCode: 'INVALID_TRANSLATION_INDEX', stage: 'validation', batchIndex: 0 } });
+    diagnostic: { validationCode: 'INVALID_TRANSLATION_INDEX', stage: 'validation' } });
   assert.equal(JSON.stringify(result).includes(secret), false);
 });
 
-const workspaceCapabilities = completionCapabilities + String.raw`
+const workspaceCapabilities = completionCapabilities + `export { jsonTaskResponse } from ${JSON.stringify(fileURLToPath(new URL('../../../../server/server/src/services/jsonTaskResponse.js', import.meta.url)).replaceAll('\\', '/'))};\n` + String.raw`
 export const LYRIC_TRANSLATION_POLICY_VERSION = 2;
 export class LyricSourceError extends Error {}
 export class LyricArtifactStoreError extends Error {}
@@ -150,6 +146,7 @@ export const lyricSourceLoaderForDb = unused;
 export const inspectLyricCandidates = unused;
 export const LYRIC_CANDIDATE_INSPECTION_LIMITS = {maxResponseBytes:100000,maxCandidates:10};
 export const readBoundedJson = request => request.json();
+export const MAX_LYRIC_ARTIFACT_BYTES = 4 * 1024 * 1024;
 export const guardExternalLyricStore = x => x;
 export const isExternalLyricSongId = x => x.startsWith('yt:');
 export const lyricSongStillExists = async () => true;
@@ -178,9 +175,9 @@ async function workspaceFailure({ result, role = 'admin', actualDraft = false } 
 
 test('the admin draft route exposes a safe diagnostic while retaining its existing HTTP failure contract', async () => {
   const f = await workspaceFailure({ actualDraft: true });
-  assert.equal(f.response.status, 503);
+  assert.equal(f.response.status, 200); assert.equal(f.payload.code, 503);
   assert.deepEqual(f.payload, { ok: false, code: 503, error: 'LYRIC_AI_FAILED', message: 'invalid_output',
-    data: { diagnostic: { code: 'INVALID_TRANSLATION_INDEX', stage: 'validation', batch: 0 } } });
+    data: { diagnostic: { code: 'INVALID_TRANSLATION_INDEX', stage: 'validation' } } });
   assert.equal(f.response.headers.get('Cache-Control'), 'private, no-store');
   assert.equal(f.writes, 0);
   assert.equal(JSON.stringify(f.payload).includes(secret), false);
@@ -194,8 +191,8 @@ test('draft route revalidates diagnostics and strips every unapproved field', as
   assert.deepEqual(f.payload.data, { diagnostic: { code: 'INVALID_COVERAGE', stage: 'validation', batch: 1 } });
   assert.equal(JSON.stringify(f.payload).includes(secret), false);
   for (const diagnostic of [
-    { validationCode: secret, stage: 'validation', batchIndex: 0 },
-    { validationCode: 'INVALID_COVERAGE', stage: secret, batchIndex: 0 },
+    { validationCode: secret, stage: 'validation' },
+    { validationCode: 'INVALID_COVERAGE', stage: secret },
     { validationCode: 'INVALID_COVERAGE', stage: 'validation', batchIndex: -1 },
     { validationCode: 'INVALID_COVERAGE', stage: 'validation', batchIndex: secret },
   ]) {
@@ -209,12 +206,12 @@ test('nonvalidation draft failures retain the original response without diagnost
   assert.deepEqual(f.payload, { ok: false, code: 503, error: 'LYRIC_AI_FAILED', message: 'upstream_unavailable' });
 });
 
-test('the diagnostic change preserves the admin-only draft mutation gate', async () => {
+test('a member receives the same safe draft failure contract without a shared mutation', async () => {
   const f = await workspaceFailure({ role: 'member', result: { status: 'failed', errorCode: 'invalid_output',
-    diagnostic: { validationCode: 'INVALID_COVERAGE', stage: 'validation', batchIndex: 0 } } });
-  assert.equal(f.response.status, 403);
-  assert.equal(f.payload.error, 'FORBIDDEN');
-  assert.equal(f.payload.data, undefined);
-  assert.equal(f.draftCalls, 0);
+    diagnostic: { validationCode: 'INVALID_COVERAGE', stage: 'validation' } } });
+  assert.equal(f.response.status, 200); assert.equal(f.payload.code, 503);
+  assert.equal(f.payload.error, 'LYRIC_AI_FAILED');
+  assert.deepEqual(f.payload.data, { diagnostic: { code: 'INVALID_COVERAGE', stage: 'validation' } });
+  assert.equal(f.draftCalls, 1);
   assert.equal(f.writes, 0);
 });

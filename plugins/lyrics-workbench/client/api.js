@@ -13,9 +13,9 @@ export function createLyricsWorkspaceApi(host) {
   const request = async (path, { method = 'GET', body, query, signal } = {}) => {
     if (!host?.isCurrent()) throw inactive();
     const session = host.session.get();
-    const memberAction = method === 'POST' && ['/candidates/inspect', '/ai-completion'].some(suffix => path.endsWith(suffix));
-    if (method !== 'GET' && !memberAction && session?.user?.role !== 'admin') {
-      throw new LyricsWorkspaceError('只有管理员可以修改共享歌词。', { status: 403, code: 'FORBIDDEN' });
+    const canEdit = ['member', 'admin'].includes(session?.user?.role);
+    if (method !== 'GET' && !canEdit) {
+      throw new LyricsWorkspaceError('没有修改共享歌词的权限。', { status: 403, code: 'FORBIDDEN' });
     }
     if (['/ai-completion', '/draft-ai'].some(suffix => path.endsWith(suffix)) && !host.features.isAvailable('ai')) {
       const code = 'PLUGIN_DEPENDENCY_UNAVAILABLE';
@@ -44,8 +44,10 @@ export function createLyricsWorkspaceApi(host) {
     updateLyricsOffset: (songId, offset) => request(`${path(songId)}/offset`, { method: 'PATCH', body: {
       offsetMs: clampLyricOffset(offset.offsetMs), etag: offset.etag ?? null } }),
     shiftLyricsTimeline: (songId, { deltaMs, etag }) => request(`${path(songId)}/timeline`, { method: 'PATCH', body: { deltaMs, etag } }),
-    saveLyricsDocument: (songId, { lines, etag, aiReceipt, translationLanguage }) => request(`${path(songId)}/document`, {
-      method: 'PUT', body: { lines, etag, ...(aiReceipt ? { aiReceipt } : {}), ...(translationLanguage ? { translationLanguage } : {}) } }),
+    prepareLyricsDraft: (songId, body) => request(`${path(songId)}/preview`, { method: 'POST', body }),
+    saveLyricsDocument: (songId, { lines, etag, aiReceipt, translationLanguage, restoreAsset, reset }) => request(`${path(songId)}/document`, {
+      method: 'PUT', body: { lines, etag, ...(aiReceipt ? { aiReceipt } : {}), ...(translationLanguage ? { translationLanguage } : {}),
+        ...(restoreAsset ? { restoreAsset } : {}), ...(reset === true ? { reset: true } : {}) } }),
     completeDraftLyrics: (songId, { lines, etag, translationLanguage, cleanDirtyLyrics = false }) => request(`${path(songId)}/draft-ai`, {
       method: 'POST', body: { lines, etag, cleanDirtyLyrics, ...(translationLanguage ? { translationLanguage } : {}) } }),
     importLyricsLrc: (songId, { lrc, etag }) => request(`${path(songId)}/import`, { method: 'POST', body: { lrc, etag } }),

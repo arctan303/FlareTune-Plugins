@@ -1,5 +1,5 @@
 import { translationLanguageMatches } from '../shared/translation-languages.js';
-import { budgetFailureState, publicBudgetErrorCode } from './automaticRetry.js';
+import { publicBudgetErrorCode } from './automaticRetry.js';
 const DEFAULT_SETTINGS = Object.freeze({ onlineEnabled: true, lyricPreference: 'word', targetLanguage: 'en', completionEnabled: true });
 const readyArtifact = read => read?.artifact?.status === 'ready' ? read.artifact : null;
 export const isProtectedWorkbenchArtifact = artifact => artifact?.original?.source === 'manual' || artifact?.provenance?.evaluation === 'manual';
@@ -8,8 +8,8 @@ export function markManuallySelectedArtifact(artifact) {
     managedBy: 'lyrics-workbench', evaluation: 'manual', quality: 'good',
     originalSource: artifact.provenance?.originalSource || artifact.original.source } } : artifact;
 }
-const isAssessed = (artifact, config) => artifact?.provenance?.managedBy === 'lyrics-workbench' && artifact.provenance.evaluation === 'assessed'
-  && (!config.assessmentKey || artifact.provenance.assessmentKey === config.assessmentKey);
+const isAssessed = artifact => artifact?.provenance?.managedBy === 'lyrics-workbench' && artifact.provenance.evaluation === 'assessed';
+const isProcessed = artifact => isProtectedWorkbenchArtifact(artifact) || isAssessed(artifact);
 const spokenLanguageMatches = translationLanguageMatches;
 const safeFailure = code => Object.assign(new Error(code), { code, status: 409 });
 const MISS_TTL_MS = 10 * 60 * 1000;
@@ -17,7 +17,7 @@ const MISS_TTL_MS = 10 * 60 * 1000;
 // The adapter injects the existing host matching, storage and AI capabilities.
 // Selection stays pure until the outer chain actually adopts this source.
 export function createWorkbenchSourceCore({ env, db, session, executionContext, context, store, operations, dependencies = {} }) {
-  const claimedReads = new Map(), checkedFiles = new Map();
+  const claimedReads = new Map();
   const settings = async () => ({ ...DEFAULT_SETTINGS, ...await operations.settings() });
   const current = async song => { await operations.assertReadScope?.(); return store.get(song.id); };
   const beginRead = () => (operations.beginRead || operations.assertCurrent)();
@@ -26,12 +26,12 @@ export function createWorkbenchSourceCore({ env, db, session, executionContext, 
     return operations.createDocument({ ...artifact.original, providerMeta: { ...artifact.provenance,
       durationDelta: matched > 0 && duration > 0 ? Math.abs(matched - duration) : undefined } });
   };
-  const grade = (document, artifact, config) => {
-    if (isProtectedWorkbenchArtifact(artifact)) return 'good';
-    if (isAssessed(artifact, config) && artifact.provenance.quality === 'weak') return 'weak';
+  const grade = (document, artifact, config, existing = true) => {
+    if (isProtectedWorkbenchArtifact(artifact) || existing && isAssessed(artifact)) return 'good';
+    if (isAssessed(artifact) && artifact.provenance.quality === 'weak') return 'weak';
     return operations.reliable(document) && (config.lyricPreference === 'line' ? ['line', 'word'].includes(document.syncMode) : document.syncMode === 'word') ? 'good' : 'weak';
   };
-  const toResult = async (read, song, config, { onAdopt } = {}) => {
+  const toResult = async (read, song, config, { onAdopt, initialCandidate = false } = {}) => {
     const artifact = readyArtifact(read); if (!artifact) return null;
     const document = documentFor(artifact, song);
     const projected = operations.project(artifact, { song, targetLanguage: config.targetLanguage });
@@ -48,7 +48,7 @@ export function createWorkbenchSourceCore({ env, db, session, executionContext, 
     const state = valid ? 'ready' : !needs ? 'not_needed' : projected?.translationState === 'pending' ? 'pending'
       : projected?.translationState === 'failed' ? 'failed' : available ? 'idle' : 'unavailable';
     const supported = Boolean(valid || available && state !== 'not_needed');
-    return { quality: grade(document, artifact, config), document, artifact, etag: read.etag,
+    return { quality: grade(document, artifact, config, !initialCandidate), document, artifact, etag: read.etag,
       translation: { supported, state: supported || state === 'not_needed' ? state : 'unavailable', targetLanguage: config.targetLanguage,
         language: valid ? translationLanguage : null,
         source: valid ? translation.source : available ? 'ai' : null,
@@ -65,53 +65,68 @@ export function createWorkbenchSourceCore({ env, db, session, executionContext, 
   };
   const completeSelected = async (read, song, config, options = {}, automatic = false) => {
     let result = await toResult(read, song, config);
-    if (!result || ['ready', 'pending'].includes(result.translation.state) || !config.completionEnabled) return result;
-    const cachedNoOp = operations.hasNoTranslationDecision(read.artifact, song, { targetLanguage: config.targetLanguage });
-    if (result.translation.state === 'not_needed' && cachedNoOp
-      || !result.translation.supported && result.translation.state !== 'not_needed') return result;
-    // A stale pending record has lost its retry scope. Keep the original and
-    // require an explicit action instead of restarting language preparation.
-    if (automatic && read.artifact.aiCompletion?.status === 'pending') return result;
-    const budgetFailure = Boolean(budgetFailureState(read.artifact.aiCompletion));
-    // An unknown-language failure is not a no-translation decision. Ordinary
-    // reads retain its retryable status; the owning-source POST may retry it.
-    if (automatic && result.translation.state === 'failed'
-      && /^(?:language_assessment_|language_undetermined$)/u.test(read.artifact.aiCompletion?.errorCode || '')) return result;
+    if (!result || ['ready', 'pending', 'not_needed'].includes(result.translation.state) || !config.completionEnabled) return result;
+    if (!result.translation.supported) return result;
+    // Ordinary reads never restart a failed or abandoned task. One explicit
+    // action owns its complete-song request and the one output repair.
+    if (automatic && ['pending', 'failed'].includes(read.artifact.aiCompletion?.status)) return result;
     const expectedHash = read.artifact.textHash;
     const aiConfig = await operations.aiConfig(db);
     const completionDeps = { ...dependencies.aiDeps, session, consumerContext: context,
       subsonicPrincipal: dependencies.subsonicPrincipal, registry: dependencies.registry,
       signal: options.signal, lyricConfig: aiConfig,
       checkCurrent: value => { if (value?.artifact?.textHash !== expectedHash) throw safeFailure('LYRIC_RESULT_STALE'); return value; } };
-    // beginCompletion synchronously assesses an idle song and hands its one
-    // pending claim to generation. A separate prepare here would settle and
-    // immediately recreate that claim. Existing failures/no-ops still need
-    // their decision cache reconciled before considering automatic work.
-    if (operations.prepareLanguage && result.translation.state !== 'idle' && !budgetFailure) {
-      const prepared = await operations.prepareLanguage({ env, db, song, store,
-        actorAccountId: session?.account?.accountId || context?.identity?.accountId,
-        targetLanguage: config.targetLanguage,
-        deps: { ...completionDeps, initialRead: { ...read, state: 'found' } } });
-      read = prepared.read;
-      song = prepared.song || song;
-      if (!readyArtifact(read) || read.artifact.textHash !== expectedHash) throw safeFailure('LYRIC_RESULT_STALE');
-      result = await toResult(read, song, config);
-      if (prepared.need !== 'needed' || !result || ['ready', 'pending', 'not_needed'].includes(result.translation.state)
-        || !result.translation.supported) return result;
+    if (automatic) {
+      // A host-owned retention and waitUntil are both required for work that
+      // outlives this response. Older hosts can still use explicit translation.
+      if (typeof executionContext?.waitUntil !== 'function' || typeof dependencies.retainBackgroundTask !== 'function') return result;
+      return { ...result, settled: Promise.resolve().then(async () => {
+        let selected = read, targetSong = song;
+        if (operations.resolveTranslationNeed(read.artifact.original, song,
+          { targetLanguage: config.targetLanguage, artifact: read.artifact }).state === 'unknown') {
+          if (!operations.prepareLanguage) return result;
+          const prepared = await operations.prepareLanguage({ env, db, song, store,
+            actorAccountId: session?.account?.accountId || context?.identity?.accountId,
+            targetLanguage: config.targetLanguage,
+            deps: { ...completionDeps, initialRead: { ...read, state: 'found' } } });
+          selected = prepared.read; targetSong = prepared.song || song;
+          if (!readyArtifact(selected) || selected.artifact.textHash !== expectedHash) throw safeFailure('LYRIC_RESULT_STALE');
+          const assessed = await toResult(selected, targetSong, config);
+          if (prepared.need !== 'needed' || ['ready', 'pending', 'failed', 'not_needed', 'unavailable'].includes(assessed.translation.state)) return assessed;
+        }
+        let held = dependencies.retainBackgroundTask();
+        const release = () => { if (held) { const retained = held; held = null; retained.release(); } };
+        let task;
+        try {
+          if (!held || typeof held.release !== 'function' || !Number.isFinite(held.deadlineAt)) throw new TypeError('Invalid lyric background retention');
+          const backgroundSignal = held.signal && completionDeps.signal
+            ? AbortSignal.any([held.signal, completionDeps.signal]) : held.signal || completionDeps.signal;
+          const generation = await operations.beginCompletion({ env, db, song: targetSong, store,
+            actorAccountId: session?.account?.accountId || context?.identity?.accountId,
+            force: false, targetLanguage: config.targetLanguage, automatic: true,
+            deps: { ...completionDeps, signal: backgroundSignal, automaticDeadlineAt: held.deadlineAt, initialRead: { ...selected, state: 'found' } } });
+          if (generation.task) {
+            task = Promise.resolve(generation.task).finally(release);
+            executionContext.waitUntil(task);
+          } else release();
+          // Only wait for preparation and the pending claim, never the whole
+          // background translation. Its existing platform lifetime is finite.
+          return toResult(generation.artifact ? generation : await current(targetSong), targetSong, config);
+        } catch (error) { release(); task?.catch(() => {}); throw error; }
+      }) };
     }
-    // A freshly prepared policy decision clears only obsolete pre-1.0 failures.
-    // New generation failures remain visible until POST, without a read loop.
-    if (automatic && result.translation.state === 'failed'
-      && !budgetFailure) return result;
-    const started = await operations.beginCompletion({ env, db, song, store,
+    const started = Promise.resolve().then(() => operations.beginCompletion({ env, db, song, store,
       actorAccountId: session?.account?.accountId || context?.identity?.accountId,
       force: false, targetLanguage: config.targetLanguage, automatic,
-      deps: { ...completionDeps, initialRead: { ...read, state: 'found' } } });
-    if (started.task) {
-      if (executionContext?.waitUntil) executionContext.waitUntil(started.task);
-      else void started.task.catch(() => undefined);
-    }
-    return toResult(started.artifact ? started : read, started.song || song, config);
+      deps: { ...completionDeps, initialRead: { ...read, state: 'found' } } }));
+    // A retrying POST may need classification first. Both
+    // stages belong outside source selection's short deadline, and the JSON
+    // caller must start its heartbeat before that preparation can block.
+    return { ...result, settled: started.then(async generation => {
+      const finished = generation.task ? await generation.task : generation;
+      const final = finished?.artifact ? finished : await current(generation.song || song);
+      return toResult(final, generation.song || song, config);
+    }) };
   };
   const ensureSongAvailable = async song => {
     const exists = typeof dependencies.songStillExists === 'function'
@@ -128,13 +143,10 @@ export function createWorkbenchSourceCore({ env, db, session, executionContext, 
   };
   const prepare = async (song, config, options, claimedRead) => {
     const initial = claimedRead || await current(song), artifact = readyArtifact(initial);
-    if (artifact && isProtectedWorkbenchArtifact(artifact)) return { read: initial, changed: false };
+    if (artifact && isProcessed(artifact)) return { read: initial, changed: false, processed: true };
     const missAge = (dependencies.now || Date.now)() - Date.parse(initial.artifact?.updatedAt);
     if (initial.artifact?.status === 'deleting' || initial.artifact?.status === 'not_found' && missAge >= 0 && missAge < MISS_TTL_MS) return { read: initial, changed: false };
     if (operations.assessmentSettings) Object.assign(config, await operations.assessmentSettings(config));
-    if (artifact && isAssessed(artifact, config)) return { read: initial, changed: false };
-    const checkedKey = JSON.stringify([initial.etag, config.assessmentKey, config.onlineEnabled, config.lyricPreference]);
-    if (artifact && checkedFiles.get(song.id) === checkedKey) return { read: initial, changed: false };
     let selected = artifact ? documentFor(artifact, song) : null;
     let selectedFromFile = Boolean(artifact);
     if (config.onlineEnabled) {
@@ -158,14 +170,10 @@ export function createWorkbenchSourceCore({ env, db, session, executionContext, 
       }
       return { read: initial, changed: false };
     }
-    // Reusing the same original does not require a storage mutation merely to
-    // record that providers were checked. Keep this evaluation in this request;
-    // the original ETag and provenance remain valid for completion and CAS.
-    if (artifact && selectedFromFile) {
-      checkedFiles.set(song.id, checkedKey);
-      return { read: initial, changed: false };
-    }
-    let built = await operations.buildArtifact(song, selected, { targetLanguage: config.targetLanguage });
+    // Once this source has actually evaluated an unprocessed file, persist that
+    // fact on adoption so fresh reads need not repeat source selection.
+    let built = artifact && selectedFromFile ? { artifact: { ...artifact } }
+      : await operations.buildArtifact(song, selected, { targetLanguage: config.targetLanguage });
     if (artifact && artifact.textHash === built.artifact.textHash && artifact.original.lines.length === built.artifact.original.lines.length) {
       // A same-text upgrade may improve real timing: retain the new original,
       // while reusing a compatible layer and the saved overall offset.
@@ -174,7 +182,7 @@ export function createWorkbenchSourceCore({ env, db, session, executionContext, 
         ...(artifact.translationDecision ? { translationDecision: artifact.translationDecision } : {}),
         aiCompletion: built.artifact.translation ? null : artifact.aiCompletion } };
     }
-    const quality = grade(selected, built.artifact, config);
+    const quality = grade(selected, built.artifact, config, false);
     built.artifact.provenance = { ...built.artifact.provenance,
       managedBy: 'lyrics-workbench', evaluation: 'assessed', quality,
       ...(config.assessmentKey ? { assessmentKey: config.assessmentKey } : {}),
@@ -185,29 +193,33 @@ export function createWorkbenchSourceCore({ env, db, session, executionContext, 
   const source = {
     id: 'lyrics-workbench',
     async claim(song) {
-      if (!song?.id || song.language === 'instrumental') return false;
+      if (!song?.id) return false;
       await operations.assertReadScope?.();
-      const config = await settings();
-      if (config.onlineEnabled) return true;
       const read = await current(song);
+      if (isProcessed(readyArtifact(read))) { claimedReads.set(song.id, read); return true; }
+      if (song.language === 'instrumental') return false;
+      const config = await settings();
+      if (config.onlineEnabled) { claimedReads.set(song.id, read); return true; }
       if (!readyArtifact(read)) return false;
       claimedReads.set(song.id, read);
       return true;
     },
     async resolve(song, options = {}) {
-      if (!song?.id || song.language === 'instrumental') return null;
+      if (!song?.id) return null;
       options.signal?.throwIfAborted();
       await beginRead();
-      const config = await settings();
       const claimedRead = options.resultRef ? null : claimedReads.get(song.id);
       claimedReads.delete(song.id);
+      const initial = claimedRead || await current(song);
+      if (song.language === 'instrumental' && !isProcessed(readyArtifact(initial))) return null;
+      const config = await settings();
       const planned = store.singleflight
-        ? await store.singleflight(song.id, ({ signal = options.signal } = {}) => prepare(song, config, { ...options, signal }, claimedRead),
+        ? await store.singleflight(song.id, ({ signal = options.signal } = {}) => prepare(song, config, { ...options, signal }, initial),
           { signal: options.signal, executionContext })
-        : await prepare(song, config, options, claimedRead);
+        : await prepare(song, config, options, initial);
       if (!readyArtifact(planned.read)) return null;
       const selectedHash = planned.read.artifact.textHash;
-      return toResult(planned.read, song, config, { onAdopt: async () => {
+      return toResult(planned.read, song, config, { initialCandidate: planned.changed, onAdopt: async () => {
         await operations.assertReadScope?.(); options.signal?.throwIfAborted();
         let adopted = planned.read;
         if (planned.changed) {
@@ -226,7 +238,7 @@ export function createWorkbenchSourceCore({ env, db, session, executionContext, 
           }
         }
         if (adopted.artifact.textHash !== selectedHash) throw safeFailure('LYRIC_RESULT_STALE');
-        return config.completionEnabled
+        return config.completionEnabled && !planned.processed
           ? completeSelected(adopted, song, config, options, true)
           : toResult(adopted, song, config);
       } });

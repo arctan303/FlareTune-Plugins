@@ -25,7 +25,7 @@ export function createLyricSource({ env, db = env?.DB, session, executionContext
     if (typeof context?.assertCurrent === 'function') return context.assertCurrent();
     if (dependencies.subsonicPrincipal) throw new Error('PLUGIN_SERVICE_CONTEXT_MISMATCH');
     ownLease ||= (dependencies.createOperationLease || createPluginOperationLease)({ env, session,
-      pluginId: 'lyrics-workbench', context, registry: dependencies.registry });
+      pluginId: 'lyrics-workbench', context, registry: dependencies.registry, authorization: 'request' });
     return (await ownLease).assertCurrent();
   };
   const ai = () => aiLease ||= Promise.resolve((dependencies.createAiLease || createLyricsAiLease)({ env, session, context,
@@ -40,8 +40,7 @@ export function createLyricSource({ env, db = env?.DB, session, executionContext
     return { ...config, cleanDirtyLyrics: false, translateLyrics: true, detectLanguage: true,
       referenceExistingTranslation: true };
   })();
-  // This factory is request-scoped. The model/configuration assertion remains
-  // live on every call; only the already-resolved client capability is reused.
+  // This factory and its accepted model/configuration snapshot are request-scoped.
   const accessFor = input => input.deps.aiAccess || (completionAccess ||= (async () =>
     createLyricsAiAccess({ env, db, session, context, signal: input.deps.signal,
       deps: { ...input.deps, aiLease: await ai() } }))());
@@ -131,8 +130,8 @@ export function createLyricSource({ env, db = env?.DB, session, executionContext
         const unknown = dominantLyricTranslationNeed(input.deps.initialRead.artifact, input.song,
           { targetLanguage: input.targetLanguage }).state === 'unknown';
         try { return await (dependencies.prepareLanguage || prepareLyricLanguage)({ ...input,
-          // Tagged no-ops need no gateway. Unknown songs and their subsequent
-          // translation share the exact same request/model snapshot.
+          // Tagged no-ops need no gateway. Classification and an automatic
+          // translation share this accepted request's model snapshot.
           deps: { ...input.deps, ...(unknown ? { aiAccess: await accessFor(input) }
             : aiLease ? { aiLease: await aiLease } : {}) } }); }
         catch (error) {

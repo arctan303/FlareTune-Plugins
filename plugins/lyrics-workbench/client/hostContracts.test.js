@@ -11,15 +11,15 @@ const readSource = path => { if (!Object.hasOwn(sources,path)) throw new Error('
 test("fullscreen lyric entry opens the shared workspace without a tools drawer", () => {
 const lyricsWorkspace = readSource('./components/LyricsManagementWorkspace.jsx');
 assert.match(lyricsWorkspace, /managed\.saveDocument/);
-assert.match(lyricsWorkspace, /managed\.shiftTimeline/);
-assert.match(lyricsWorkspace, /managed\.importLrc/);
+assert.match(lyricsWorkspace, /lyricsWorkspaceApi\.prepareLyricsDraft/);
+assert.doesNotMatch(lyricsWorkspace, /managed\.(shiftTimeline|importLrc|restoreBackup|clearTranslation|reset)\(/);
 assert.doesNotMatch(lyricsWorkspace, /updateSongLanguage|歌曲语言<select/);
-assert.match(lyricsWorkspace, /authenticated && managed\.aiCompletionEnabled && \(!editing \|\| isAdmin\) && <button/);
+assert.match(lyricsWorkspace, /canEdit && managed\.aiCompletionEnabled && <button/);
 assert.match(lyricsWorkspace, /managed\.isAiCompleting/);
 assert.doesNotMatch(lyricsWorkspace, /manageApi\.updateSong/);
 assert.match(lyricsWorkspace, /<LyricsCandidatePanel key=\{song\.id\}/);
 assert.match(readSource('./components/LyricsCandidatePanel.jsx'), /lyricsWorkspaceApi\.getLyricsCandidates\(song\.id/);
-assert.match(lyricsWorkspace, /managed\.completeTranslation\(\)/);
+assert.match(lyricsWorkspace, /lyricsWorkspaceApi\.completeDraftLyrics\(/);
 });
 
 test("protected pages rely on the app auth gate without shipping visitor UI branches", () => {

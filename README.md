@@ -20,6 +20,14 @@
 - `main` 当前稳定源码组合：ai-gateway 0.2.1（API3）、assistant 0.2.0（API3）、lyrics-workbench 1.0.2（API5）、roam 0.1.1（API2）、xiaomi-speaker 1.1.1（API2）、youtube-music 0.2.5（API4）。目录保留已发布历史条目；实际安装由站点锁定的精确包决定。
 - YT 0.2.4 已包含增强来源链、原生译文和搜索原名展示，要求 API 4 宿主。工作台 0.3.x 仍按开发目录发布；历史增强 API 3 包依赖额外的歌词接口，不能仅凭相同 API 数字认定兼容。
 
+### 开发通道：歌词工作台 1.1.0 / AI 网关 0.2.3
+
+开发目录新增歌词工作台 1.1.0 和 AI 网关 0.2.3，均要求宿主能力 API 6；服务 API 和数据版本保持不变。先升级宿主，再正常更新插件，保留已有模型、来源和歌词文件。消费端继续只请求统一歌词接口：人工或工作台已处理文件直接返回；否则复用合格来源译文，按歌曲标签判断，缺少依据才独立快速识别。需要翻译时先返回正文和翻译状态，同时自动启动整首翻译，后续请求复用；输出不合格最多补救一次。
+
+成员和管理员都可编辑共享歌词；候选、导入、文字、译文、时间和手动 AI 连续进入同一草稿，最后保存才写共享文件，取消和保存冲突保留既有内容。模型和来源设置仍仅管理员。等待模型时不反复查询权限或配置，也不再额外设置每个歌词请求 50 次数据库预算。自动后台沿用现有 Worker 响应后最多约 30 秒的执行窗口，较慢任务可能超时；失败保留原文和旧译文，可明确重试。这不是稳定发布或对任意长度歌词完成时间的保证。详见[工作台说明](release-notes/lyrics-workbench-1.1.0.md)和[网关说明](release-notes/ai-gateway-0.2.3.md)。
+
+**Development channel.** Lyrics workspace 1.1.0 and AI gateway 0.2.3 require host capability API 6. Upgrade the host first; existing model connections, lyric sources and files remain in place. Processed files and usable provider translations are reused. Missing language evidence is assessed separately, then needed whole-song translation starts automatically as the original lyrics return. Members and administrators share one editing draft and save once; model and source settings remain administrator-only. Automatic background work retains the existing approximately 30-second post-response Worker limit, so slower tasks can time out and require an explicit retry. See the bilingual notes above; these packages do not publish or deploy a stable host release.
+
 ### 歌词工作台 1.0.0 / Lyrics workspace 1.0.0
 
 首个正式版将歌词 AI 收敛为一个启用开关和一次模型配置：同一模型分别承担缺标歌曲的主要语言打标与歌词翻译。已有合格的目标语言来源译文直接复用；主要语言与目标一致时，不为少量外语插句额外翻译，例如中文为主的歌不另译成中文。需要翻译时先返回正文，再异步生成，后续请求复用同一任务；失败保留正文并可重试，客户端不新增语言判断。已完成本地完整测试、dev 实测及独立复核；实际可安装版本以官方目录为准。

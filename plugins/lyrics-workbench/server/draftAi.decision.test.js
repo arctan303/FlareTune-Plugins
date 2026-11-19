@@ -31,6 +31,47 @@ test('a virtual-song AI draft returns the no-op decision in its receipt without 
   assert.equal(calls, 1);
 });
 
+test('foreign unknown draft classifies first and translates the complete draft separately', async () => {
+  const env = { SETUP_SECRET: 'fixture-secret-for-foreign-draft-at-least-32-characters' };
+  const song = { id: 'yt:abcdefghijk', language: null, title: 'Fixture', artist: 'Singer' };
+  const lines = [{ time: 1, text: '君を待っている' }, { time: 2, text: '夜空を見上げる' }];
+  const roles = []; let usage = 0;
+  const config = { provider: 'openai', model: 'fixture', targetLanguage: 'zh', completionEnabled: true,
+    translateLyrics: true, cleanDirtyLyrics: false };
+  const result = await completeLyricDraft({ env, db: {}, song, lines, translationLanguage: 'zh', actorAccountId: 'member', etag: 'v1', deps: {
+    aiAccess: { db: {}, lease: {}, config, client: { assertCurrent: async () => {}, ask: async messages => {
+      const payload = JSON.parse(messages.at(-1).content);
+      roles.push(payload.languageTable ? 'classify' : 'translate');
+      if (payload.languageTable) return { language: 'ja', match: 0.99 };
+      assert.equal(payload.sourceLanguage, 'ja'); assert.equal(payload.units.length, 2);
+      return { translations: payload.units.map(unit => ({ unitId: unit.unitId, text: '我在夜空下等你' })) };
+    } } }, reserveDailyQuota: async () => { usage++; return true; },
+  } });
+  assert.equal(result.status, 'ready'); assert.deepEqual(roles, ['classify', 'translate']); assert.equal(usage, 2);
+  assert.equal(result.inferredLanguage, 'ja'); assert.equal(result.translationLanguage, 'zh');
+  assert.ok(result.lines.every(line => line.tlyric === '我在夜空下等你'));
+  assert.deepEqual(result.lines.map(({ tlyric, ...line }) => line), lines); assert.equal(song.language, null);
+});
+
+test('unknown same-target draft can classify then reclaim its private task for explicit cleanup', async () => {
+  const env = { SETUP_SECRET: 'fixture-secret-for-lyric-draft-at-least-32-characters' };
+  const song = { id: 'yt:abcdefghijk', language: null, title: 'Fixture', artist: 'Singer' };
+  const lines = [{ time: 0, text: '非演唱署名' }, { time: 2, text: '我们一起唱歌' }];
+  const original = structuredClone(lines), roles = []; let usage = 0;
+  const config = { provider: 'openai', model: 'fixture', targetLanguage: 'zh', completionEnabled: true,
+    translateLyrics: true, cleanDirtyLyrics: true };
+  const result = await completeLyricDraft({ env, db: {}, song, lines, translationLanguage: 'zh', actorAccountId: 'owner', etag: 'v1',
+    deps: { aiAccess: { db: {}, lease: {}, config, client: { assertCurrent: async () => {}, ask: async messages => {
+      const payload = JSON.parse(messages.at(-1).content);
+      roles.push(payload.languageTable ? 'classify' : 'cleanup');
+      if (payload.languageTable) return { language: 'zh', match: 0.99 };
+      assert.equal(payload.units.length, 0); assert.equal(payload.cleanupUnits.length, 2);
+      return { discardLineIndices: [0] };
+    } } }, reserveDailyQuota: async () => { usage++; return true; } } });
+  assert.equal(result.status, 'ready'); assert.deepEqual(result.lines, [lines[1]]);
+  assert.deepEqual(roles, ['classify', 'cleanup']); assert.equal(usage, 2); assert.deepEqual(lines, original);
+});
+
 // This SDK fixture checks the public decision-scope contract. It deliberately
 // does not reproduce the host's language classifier or artifact implementation.
 const scopedCapabilities = completionCapabilities.replace('export const projectLyricArtifact =', 'const baseProjectLyricArtifact =') + `

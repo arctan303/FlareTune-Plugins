@@ -17,7 +17,7 @@ function setup(api, songValue = song, translator = translate, globals = {}) {
       '@flaretune/plugin-sdk': { t: translator, SelectControl: 'SelectControl' },
       '../services/localLyricsWorkspaceApi.js': { lyricsWorkspaceApi: { getSources: async () => ({data:{sources:['custom_krc','custom_lrc','lrclib']}}), ...api } },
       './candidates.js': state }, globals: { AbortController, setInterval, clearInterval, ...globals } });
-  const props = { api: { getSources: async () => ({data:{sources:['custom_krc','custom_lrc','lrclib']}}), ...api }, song: songValue, authenticated: true, isAdmin: true, saving: false, active: true,
+  const props = { api: { getSources: async () => ({data:{sources:['custom_krc','custom_lrc','lrclib']}}), ...api }, song: songValue, authenticated: true, canEdit: true, saving: false, active: true,
     Preview: 'Preview', onImport: inspection => imports.push(inspection) };
   return { component, props, imports, render: () => component.render(props) };
 }

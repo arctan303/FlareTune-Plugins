@@ -40,7 +40,7 @@ function setup({ managed: overrides = {}, section = 'current', translator = tran
       './LyricsSettings.jsx': 'LyricsSettings',
       './api.js': { createLyricsWorkspaceApi: () => ({ completeDraftLyrics: async (_, body) => {
         return {data:{}};
-      } }) },
+      }, prepareLyricsDraft: async () => ({ data: { lyrics: { lines: [{ time: 1, text: 'Imported' }] } } }) }) },
       'lucide-react': {}, '../store/useUIStore.js': { useUIStore, showToast() {} },
       '../store/usePlayerStore.js': { usePlayerStore },
       './useManagedLyricsAsset.js': { useManagedLyricsAsset: () => managed },
@@ -74,15 +74,17 @@ test('workspace confirms unsaved edits and timing conversion using complete tran
   s.component.unmount();
 });
 
-test('import and restore confirmations use translated sentences', async () => {
+test('import and restore stage the draft without an immediate shared overwrite confirmation', async () => {
   const s = setup({ section: 'tools' });
   const inputs = nodes(s.render()).filter(node => node.type === 'input' && node.props.type === 'file');
   await inputs[0].props.onChange({ target: { files: [{ size: 20, text: async () => '[00:01]Hello' }], value: 'lyrics.lrc' } });
   await flushAsync();
-  assert.equal(s.confirmations.at(-1), 'Importing will replace the shared lyrics. Continue?');
+  assert.equal(s.confirmations.length, 0); assert.equal(s.saves.length, 0);
   await inputs[1].props.onChange({ target: { files: [{ size: 20, text: async () => '{}' }], value: 'lyrics.json' } });
   await flushAsync();
-  assert.equal(s.confirmations.at(-1), 'Restoring will replace this song’s shared lyrics. Continue?');
+  assert.equal(s.confirmations.length, 0); assert.equal(s.saves.length, 0);
+  await button(s.render(), '保存').props.onClick(); await flushAsync();
+  assert.equal(s.saves.length, 1); assert.equal(s.saves[0][0][0].text, 'Imported');
   s.component.unmount();
 });
 

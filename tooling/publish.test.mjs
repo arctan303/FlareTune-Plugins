@@ -228,7 +228,7 @@ test('consumer imports cannot name a provider private credential module', async 
   await assert.rejects(createArtifact('sample', { root }));
 });
 
-for (const hostApiVersion of [2, 3, 4, 5]) {
+for (const hostApiVersion of [2, 3, 4, 5, 6]) {
   test('schema-2 publisher preserves the minimum host API requirement: ' + hostApiVersion, async t => {
     const { root, base } = await fixture(t);
     const file = resolve(base, 'manifest.json');
@@ -246,8 +246,20 @@ test('publisher rejects unsupported minimum host API values without reinterpreti
   const { root, base } = await fixture(t);
   const file = resolve(base, 'manifest.json');
   const manifest = JSON.parse(await readFile(file, 'utf8'));
-  for (const hostApiVersion of [0, 1, 6, '2', '3', '4', '5', null]) {
+  for (const hostApiVersion of [0, 1, 7, '2', '3', '4', '5', '6', null]) {
     await writeFile(file, JSON.stringify({ ...manifest, hostApiVersion }));
     await assert.rejects(createArtifact('sample', { root }), { code: 'PUBLISH_MANIFEST_INVALID' });
   }
+});
+
+test('API6 packages retain the public task-response imports for the host to provide', async t => {
+  const { root, base } = await fixture(t), file = resolve(base, 'manifest.json');
+  const manifest = JSON.parse(await readFile(file, 'utf8'));
+  await writeFile(file, JSON.stringify({ ...manifest, hostApiVersion: 6 }));
+  await writeFile(resolve(base, 'server/value.js'), "import { jsonTaskResponse, deferredJsonTaskResponse } from '@flaretune/plugin-sdk/server/http-security'; export { jsonTaskResponse, deferredJsonTaskResponse }; export const value = 7;\n");
+  const built = await createArtifact('sample', { root });
+  assert.equal(built.artifact.manifest.hostApiVersion, 6);
+  const source = Object.values(built.artifact.files).join('\n');
+  assert.match(source, /@flaretune\/plugin-sdk\/server\/http-security/u);
+  assert.match(source, /jsonTaskResponse/u); assert.match(source, /deferredJsonTaskResponse/u);
 });

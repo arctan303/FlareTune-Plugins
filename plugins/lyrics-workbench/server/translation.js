@@ -1,27 +1,22 @@
 import { createLyricsAiAccess, createLyricsAiLease, guardLyricsStore } from "./aiAccess.js";
 import { DEFAULT_LYRIC_AI_CONFIG, lyricAiProcessingKey } from "./policy.js";
 import { reserveDailyQuota } from "./usage.js";
-import { buildTranslationBatches, parseLanguageAwareTranslationResponse } from "./translationFormat.js";
+import { buildWholeSongCompletionPrompt, parseWholeSongCompletionResponse } from "./completionFormat.js";
 import { createLyricDocument, isSingableLineText, isLeadingProviderMetadata } from "@flaretune/plugin-sdk/server/lyric-document";
-import { computeHash, isNonLyricText } from "@flaretune/plugin-sdk/server/lyric-parsing";
+import { computeHash } from "@flaretune/plugin-sdk/server/lyric-parsing";
 import {
   isFreshLyricAiPending,
   projectLyricArtifact,
   lyricTextForHash,
-  getCurrentLyricTranslationDecision,
   hasCurrentLyricNoTranslationDecision,
-  buildLyricNoTranslationDecision,
   buildLyricTranslationDecision,
 } from "@flaretune/plugin-sdk/server/lyric-workflow";
 
-import { dominantLyricTranslationNeed, buildLanguageAssessmentPrompt, parseLanguageAssessmentResponse, lyricLanguageTag } from './languageAssessment.js';
-import { automaticBudgetRetry, budgetFailureCode, budgetFailureState, budgetRetryScope } from './automaticRetry.js';
+import { dominantLyricTranslationNeed, lyricLanguageTag, buildLanguageAssessmentPrompt, parseLanguageAssessmentResponse } from './languageAssessment.js';
+import { automaticCompletionAllowed } from './automaticRetry.js';
 export { dominantLyricTranslationNeed } from './languageAssessment.js';
 
-const DEFAULT_DAILY_LIMIT = 50;
-const AI_COMPLETION_DEADLINE_MS = 24_000;
-// ai.js treats shorter overrides as invalid, so stop before it could fall back to 90 seconds.
-const MIN_AI_REQUEST_BUDGET_MS = 5_000;
+const AI_REQUEST_TIMEOUT_MS = 90_000;
 const VALIDATION_CODES = new Set([
   'INVALID_TARGET_LANGUAGE', 'NO_TRANSLATABLE_LINES', 'INVALID_BATCH_LIMIT', 'INVALID_JSON',
   'INVALID_NOT_NEEDED', 'INVALID_RESPONSE_FIELDS', 'INVALID_COVERAGE', 'INVALID_TRANSLATION_INDEX',
@@ -55,13 +50,13 @@ function validateCompletion(operation, stage, batchIndex) {
       ? result.catch(error => { throw markValidationFailure(error, stage, batchIndex); }) : result;
   } catch (error) { throw markValidationFailure(error, stage, batchIndex); }
 }
-const CLEANUP_INSTRUCTION = 'For this explicitly requested cleanup only, return optional discardLineIndices containing only provided cleanupUnits indices that are clearly non-sung metadata, credits, ads or corrupt text. Keep every uncertain or sung row, including a sung title. Do not change original lyrics or timing. Never remove all sung content.';
-
+// Unset means statistics only. An explicitly configured instance limit,
+// including zero, keeps its existing meaning.
 export function getDailyLyricCompletionLimit(env) {
-  const configured = Number(env?.AI_TRANSLATION_DAILY_LIMIT ?? DEFAULT_DAILY_LIMIT);
-  return Number.isFinite(configured) && configured >= 0
-    ? Math.floor(configured)
-    : DEFAULT_DAILY_LIMIT;
+  if (env?.AI_TRANSLATION_DAILY_LIMIT === undefined || env?.AI_TRANSLATION_DAILY_LIMIT === null) return null;
+  const configured = Number(env.AI_TRANSLATION_DAILY_LIMIT);
+  if (!Number.isFinite(configured) || configured < 0) throw new Error('AI_CONFIG_INVALID');
+  return Math.floor(configured);
 }
 
 const dateKey = (now) => new Date(now).toISOString().slice(0, 10);
@@ -82,34 +77,6 @@ const safeErrorCode = (error) => {
   return 'completion_failed';
 };
 
-function completionDeadline(deps, execute) {
-  const requested = Number(deps.completionDeadlineMs);
-  const timeoutMs = Number.isFinite(requested) && requested > 0
-    ? Math.min(Math.floor(requested), AI_COMPLETION_DEADLINE_MS)
-    : AI_COMPLETION_DEADLINE_MS;
-  const monotonicNow = deps.monotonicNow || (() => performance.now());
-  const deadlineAt = monotonicNow() + timeoutMs;
-  const deadline = {
-    expired: false,
-    remainingMs() {
-      if (this.expired) return 0;
-      return Math.max(0, Math.floor(deadlineAt - monotonicNow()));
-    },
-    assertRemaining(minimumMs = 1) {
-      if (this.remainingMs() < minimumMs) throw completionTimeoutError();
-    },
-  };
-  let timer;
-  const timedOut = new Promise((_resolve, reject) => {
-    timer = setTimeout(() => {
-      deadline.expired = true;
-      reject(completionTimeoutError());
-    }, timeoutMs);
-  });
-  return Promise.race([Promise.resolve().then(() => execute(deadline)), timedOut])
-    .finally(() => clearTimeout(timer));
-}
-
 function completionUnits(original, song) {
   const songTextKey = text => String(text || '').normalize('NFKC').toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
   const titleKey = songTextKey(song?.title);
@@ -121,46 +88,8 @@ function completionUnits(original, song) {
 }
 
 function cleanupUnits(original) {
-  const lines = original.lines.map((line, index) => ({ index, text: String(line.text || '').trim() }))
+  return original.lines.map((line, index) => ({ index, text: String(line.text || '').trim() }))
     .filter(({ text }) => text);
-  const selected = lines.length <= 220 ? lines : [...lines.slice(0, 170), ...lines.slice(-50)];
-  let length = 0;
-  return selected.filter(({ text }) => {
-    length += text.length;
-    return length <= 8_000;
-  });
-}
-
-async function updateInferredSongLanguage(db, song, language, deps) {
-  if (!language || language === song.language) return;
-  // External songs have no Songs row. Their lyrics remain keyed by source ID;
-  // language inference must not create or update a local catalog entry.
-  if (/^yt:[A-Za-z0-9_-]{11}$/u.test(song.id)) return;
-  const update = deps.updateSongLanguage || (async (songId, inferred, previous) => db.prepare(
-    'UPDATE Songs SET language = ? WHERE id = ? AND language IS ?',
-  ).bind(inferred, songId, previous).run());
-  const result = await update(song.id, language, song.language ?? null);
-  if (result?.meta?.changes === 0 || result?.changes === 0) {
-    const current = await db.prepare('SELECT language FROM Songs WHERE id = ?').bind(song.id).first();
-    if (current?.language !== language) throw new Error('SONG_LANGUAGE_CHANGED');
-  }
-}
-
-async function finishWithInferredLanguage(store, db, song, finished, language, deps) {
-  if (finished.state !== 'updated') return finished;
-  try {
-    await updateInferredSongLanguage(db, song, language, deps);
-    return finished;
-  } catch {
-    const failedAt = new Date((deps.now || Date.now)()).toISOString();
-    const { translationDecision: _uncommittedLanguageDecision, ...retryable } = finished.artifact;
-    const failed = await store.putIfMatch(song.id, {
-      ...retryable,
-      aiCompletion: { status: 'failed', errorCode: 'language_assessment_update_failed', updatedAt: failedAt },
-      updatedAt: failedAt,
-    }, finished.etag, { automation: finished.automation });
-    return failed.state === 'updated' ? failed : { state: 'superseded' };
-  }
 }
 
 async function conditionallyFinish(store, songId, startedAt, textHash, update, pendingSnapshot = null) {
@@ -213,189 +142,142 @@ export async function resolveLegacyLyricCleanup(_store, _song, read, _now = Date
   return read;
 }
 
-async function askModel(access, messages, deadline) {
-  const remaining = deadline.remainingMs();
-  if (remaining < MIN_AI_REQUEST_BUDGET_MS) throw completionTimeoutError();
-  const options = { ...(access.config.temperature === undefined ? {} : { temperature: access.config.temperature }),
-    ...((access.config.source || access.config.provider) === 'deepseek' ? { enableThinking: false } : {}) };
-  const execute = () => access.client.ask(messages, options, { timeoutMs: remaining });
-  const response = access.budget ? await access.budget.executeAi(execute) : await execute();
-  deadline.assertRemaining();
-  return response;
-}
-
-const found = read => ({ ...read, state: 'found' });
-const localSong = (song, language) => language && !/^yt:[A-Za-z0-9_-]{11}$/u.test(song.id)
-  ? { ...song, language } : song;
-const completionKey = (config, targetLanguage) => lyricAiProcessingKey({ ...DEFAULT_LYRIC_AI_CONFIG, ...config, targetLanguage });
-const assessmentResult = (read, song, need, reason, language = null, diagnostic) => ({
-  read: found(read), song, language, need, reason, ...(diagnostic ? { diagnostic } : {}),
-});
-const assessmentFlights = new WeakMap();
-
 function requestSignal(deps) {
   return deps.signal || deps.consumerContext?.signal || null;
 }
-function abortReason(signal) {
-  return signal?.reason || Object.assign(new Error('LYRIC_REQUEST_ABORTED'), { name: 'AbortError' });
-}
 function assertRequestActive(signal) {
-  if (signal?.aborted) throw abortReason(signal);
+  if (signal?.aborted) throw signal.reason || Object.assign(new Error('LYRIC_REQUEST_ABORTED'), { name: 'AbortError' });
 }
-function awaitOwnedRequest(operation, signal) {
-  assertRequestActive(signal);
-  if (!signal?.addEventListener) return Promise.resolve().then(operation);
-  return new Promise((resolve, reject) => {
-    const cleanup = () => signal.removeEventListener('abort', aborted);
-    const aborted = () => { cleanup(); reject(abortReason(signal)); };
-    signal.addEventListener('abort', aborted, { once: true });
-    Promise.resolve().then(() => { assertRequestActive(signal); return operation(); }).then(
-      value => { cleanup(); resolve(value); },
-      error => { cleanup(); reject(error); },
-    );
-  });
-}
+const completionKey = (config, targetLanguage) => lyricAiProcessingKey({ ...DEFAULT_LYRIC_AI_CONFIG, ...config, targetLanguage });
+const found = read => ({ ...read, state: 'found' });
+const assessmentResult = (read, song, need, reason, language = null) => ({ read: found(read), song, language, need, reason });
 
-/** Settle the selected song's predominant language before exposing its
- * translation capability. Only calls owned by the same request may share a
- * pending Promise. Other requests coordinate solely through persisted CAS. */
-export async function prepareLyricLanguage(options) {
-  const { env, db, song, store, targetLanguage, deps = {} } = options;
-  const signal = requestSignal(deps);
-  assertRequestActive(signal);
+// Preparation owns only the short language response. Its persisted decision
+// can be reused by a later translation request without holding a pending claim.
+export async function prepareLyricLanguage({ env, db, song, store, targetLanguage, force = false, deps = {} }) {
+  const signal = requestSignal(deps); assertRequestActive(signal);
   let read = deps.initialRead || await store.get(song.id);
   if (deps.checkCurrent) read = await deps.checkCurrent(read);
   assertRequestActive(signal);
-  if (!read?.artifact || read.artifact.status !== 'ready') return assessmentResult(read || {}, song, 'unknown', 'missing');
+  if (read?.artifact?.status !== 'ready') return assessmentResult(read || {}, song, 'unknown', 'missing');
   const target = targetLanguage || deps.lyricConfig?.targetLanguage || deps.aiAccess?.config.targetLanguage || 'en';
-  const preparedOptions = { ...options, initialRead: read, effectiveTarget: target };
-  const owner = signal || deps.consumerContext;
-  const scope = env?.DB || db || store;
-  if (!owner || !['object', 'function'].includes(typeof owner)
-    || !scope || !['object', 'function'].includes(typeof scope)) {
-    return awaitOwnedRequest(() => prepareLanguage(preparedOptions), signal);
+  const need = dominantLyricTranslationNeed(read.artifact, song, { targetLanguage: target });
+  if (need.state !== 'unknown' || need.reason !== 'unknown_language') return assessmentResult(read, song, need.state, need.reason, need.sourceLanguage);
+  const ownedPending = deps.ownedLanguagePendingAt && read.artifact.aiCompletion?.status === 'pending'
+    && read.artifact.aiCompletion.updatedAt === deps.ownedLanguagePendingAt;
+  if (!ownedPending && isFreshLyricAiPending(read.artifact.aiCompletion, (deps.now || Date.now)())) return assessmentResult(read, song, 'unknown', 'pending');
+  if (!ownedPending && !force && !deps.retryFailed && ['failed', 'pending'].includes(read.artifact.aiCompletion?.status)) {
+    return assessmentResult(read, song, 'unknown', 'failed');
   }
-  let scopes = assessmentFlights.get(owner);
-  if (!scopes) assessmentFlights.set(owner, scopes = new WeakMap());
-  let flights = scopes.get(scope);
-  if (!flights) scopes.set(scope, flights = new Map());
-  const key = JSON.stringify([song.id, read.artifact.textHash, song.language, target, deps.keepPending === true, deps.skipExistingTranslation === true]);
-  if (flights.has(key)) return flights.get(key);
-  const task = awaitOwnedRequest(() => prepareLanguage(preparedOptions), signal)
-    .finally(() => { if (flights.get(key) === task) flights.delete(key); });
-  flights.set(key, task);
-  return task;
+  let access;
+  try { access = deps.aiAccess || await createLyricsAiAccess({ env, db, session: deps.session,
+    context: deps.consumerContext, signal, deps }); }
+  catch { return assessmentResult(read, song, 'unknown', 'unavailable'); }
+  if (access.config.completionEnabled === false) return assessmentResult(read, song, 'unknown', 'unavailable');
+  access = { ...access, config: { ...access.config, targetLanguage: target } };
+  store = guardLyricsStore(store, access.client.assertCurrent);
+  const startedAt = ownedPending ? read.artifact.aiCompletion.updatedAt : new Date((deps.now || Date.now)()).toISOString();
+  if (!ownedPending) {
+    const claimed = await store.putIfMatch(song.id, { ...read.artifact,
+      aiCompletion: { status: 'pending', updatedAt: startedAt }, updatedAt: startedAt }, read.etag, { automation: read.automation });
+    if (claimed.state !== 'updated') {
+      const winner = await store.get(song.id);
+      const winnerNeed = dominantLyricTranslationNeed(winner.artifact, song, { targetLanguage: target });
+      return assessmentResult(winner, song, winnerNeed.state, winnerNeed.state === 'unknown' ? 'pending' : winnerNeed.reason, winnerNeed.sourceLanguage);
+    }
+    read = found(claimed);
+  }
+  const textHash = read.artifact.textHash;
+  try {
+    const language = await classifyLanguage(access, read.artifact, song, env, deps);
+    const spoken = value => /^zh(?:-|$)/u.test(value || '') ? 'zh' : value;
+    const state = spoken(language) === spoken(target) ? 'not_needed' : 'needed';
+    const timestamp = new Date((deps.now || Date.now)()).toISOString();
+    const saved = await conditionallyFinish(store, song.id, startedAt, textHash, current => ({ ...current,
+      translationDecision: completionDecision(current, song, target, state, language),
+      aiCompletion: state === 'not_needed' ? { status: 'completed', processingKey: completionKey(access.config, target), updatedAt: timestamp } : null,
+      updatedAt: timestamp }), read);
+    if (saved.state !== 'updated') return assessmentResult(saved, song, 'unknown', 'superseded');
+    return assessmentResult(saved, song, state, 'assessed_language', language);
+  } catch (error) {
+    if (signal?.aborted) return assessmentResult(read, song, 'unknown', 'superseded');
+    try { await access.client.assertCurrent(); } catch { return assessmentResult(read, song, 'unknown', 'superseded'); }
+    const timestamp = new Date((deps.now || Date.now)()).toISOString();
+    const failed = await conditionallyFinish(store, song.id, startedAt, textHash, current => ({ ...current,
+      aiCompletion: { status: 'failed', errorCode: safeErrorCode(error), updatedAt: timestamp }, updatedAt: timestamp }), read);
+    return assessmentResult(failed, song, 'unknown', failed.state === 'updated' ? 'failed' : 'superseded');
+  }
 }
 
-async function prepareLanguage({ env, db, song, store, initialRead: read, effectiveTarget: target, deps = {} }) {
-  const signal = requestSignal(deps);
-  assertRequestActive(signal);
-  if (!deps.skipExistingTranslation && projectLyricArtifact(read.artifact, { song, targetLanguage: target })?.translation) {
-    return assessmentResult(read, song, 'needed', 'existing_translation', lyricLanguageTag(song.language));
+async function classifyLanguage(access, artifact, song, env, deps) {
+  const messages = validateCompletion(() => buildLanguageAssessmentPrompt(artifact.original, song), 'setup');
+  const now = (deps.now || Date.now)();
+  if (!await (deps.reserveDailyQuota || reserveDailyQuota)(access.db, dateKey(now), getDailyLyricCompletionLimit(env), now)) throw new Error('AI_QUOTA_EXHAUSTED');
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await askModel(access, attempt ? messages.map((message, index) => index ? message : { ...message,
+      content: message.content + '\nThe previous output was invalid. Return only the required language and numeric match JSON object.' }) : messages, deps);
+    assertRequestActive(requestSignal(deps));
+    try {
+      const parsed = validateCompletion(() => parseLanguageAssessmentResponse(response), 'validation');
+      if (!parsed.language) throw markValidationFailure(new Error('LANGUAGE_UNDETERMINED'), 'validation');
+      return parsed.language;
+    } catch (error) { if (attempt || !validationFailures.has(error)) throw error; }
   }
-  let need = dominantLyricTranslationNeed(read.artifact, song, { targetLanguage: target });
-  const currentDecision = getCurrentLyricTranslationDecision(read.artifact, song, { targetLanguage: target });
-  if (currentDecision) return assessmentResult(read, song, need.state, need.reason, need.sourceLanguage);
-  let access = deps.aiAccess;
-  let inferred = null;
-  const originalHash = read.artifact.textHash;
-  const fail = async (code, diagnostic) => {
-    assertRequestActive(signal);
-    const latest = read;
-    if (latest?.artifact?.status !== 'ready' || latest.artifact.textHash !== originalHash || !latest.etag) {
-      return assessmentResult(latest || read, song, 'unknown', 'superseded');
-    }
-    const timestamp = new Date((deps.now || Date.now)()).toISOString();
-    assertRequestActive(signal);
-    const failed = await store.putIfMatch(song.id, { ...latest.artifact,
-      aiCompletion: { status: 'failed', errorCode: code, updatedAt: timestamp }, updatedAt: timestamp }, latest.etag,
-    { automation: latest.automation });
-    if (failed.state !== 'updated') return assessmentResult(await store.get(song.id), song, 'unknown', 'superseded');
-    return assessmentResult(failed, song, 'unknown', code, null, diagnostic);
-  };
+}
+
+async function askModel(access, messages, deps) {
+  const signal = requestSignal(deps); assertRequestActive(signal);
+  // The gateway's existing per-request timeout is 90s. Retain the bounded test
+  // override, but no 24s task deadline or request-local database budget.
+  const requested = Number(deps.modelTimeoutMs ?? deps.completionDeadlineMs);
+  let timeoutMs = Number.isFinite(requested) && requested > 0 ? Math.min(requested, AI_REQUEST_TIMEOUT_MS) : AI_REQUEST_TIMEOUT_MS;
+  const automaticDeadline = Number(deps.automaticDeadlineAt);
+  if (Number.isFinite(automaticDeadline)) {
+    const remaining = automaticDeadline - (deps.now || Date.now)();
+    if (remaining <= 0) throw completionTimeoutError();
+    timeoutMs = Math.min(timeoutMs, remaining);
+  }
+  const controller = new AbortController();
+  const linked = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+  const options = { ...(access.config.temperature === undefined ? {} : { temperature: access.config.temperature }),
+    ...((access.config.source || access.config.provider) === 'deepseek' ? { enableThinking: false } : {}) };
+  let timer, interrupted;
   try {
-    if (need.reason === 'invalid_target') throw markValidationFailure(new Error('INVALID_TARGET_LANGUAGE'), 'setup');
-    if (need.state === 'unknown') {
-      access ||= await createLyricsAiAccess({ env, db, session: deps.session,
-        context: deps.consumerContext, signal: deps.signal, deps });
-      if (access.config.completionEnabled === false) return assessmentResult(read, song, 'unknown', 'ai_disabled');
-      db = access.db;
-      store = guardLyricsStore(store, access.client.assertCurrent);
-      await access.client.assertCurrent();
-      assertRequestActive(signal);
-      const now = (deps.now || Date.now)();
-      if (!deps.keepPending && isFreshLyricAiPending(read.artifact.aiCompletion, now)) {
-        return assessmentResult(read, song, 'unknown', 'pending');
-      }
-      if (!deps.keepPending) {
-        access.budget?.requireSettlementRoom();
-        const timestamp = new Date(now).toISOString();
-        assertRequestActive(signal);
-        const pending = await store.putIfMatch(song.id, { ...read.artifact,
-          aiCompletion: { status: 'pending', updatedAt: timestamp }, updatedAt: timestamp }, read.etag,
-        { automation: read.automation });
-        if (pending.state !== 'updated') return assessmentResult(await store.get(song.id), song, 'unknown', 'superseded');
-        read = found(pending);
-      }
-      const decision = await completionDeadline(deps, async deadline => {
-        const reserved = await (deps.reserveDailyQuota || reserveDailyQuota)(db, dateKey(now), getDailyLyricCompletionLimit(env), now);
-        if (!reserved) throw new Error('AI_QUOTA_EXHAUSTED');
-        assertRequestActive(signal);
-        const response = await awaitOwnedRequest(() => askModel(access, buildLanguageAssessmentPrompt(read.artifact.original, song), deadline), signal);
-        assertRequestActive(signal);
-        return validateCompletion(() => parseLanguageAssessmentResponse(response), 'validation');
-      });
-      if (!decision.language) return fail('language_assessment_undetermined');
-      inferred = decision.language;
-      need = dominantLyricTranslationNeed(read.artifact, { ...song, language: inferred }, { targetLanguage: target });
-    }
-    assertRequestActive(signal);
-    const effectiveSong = localSong(song, inferred);
-    const latest = read;
-    if (latest?.artifact?.status !== 'ready' || latest.artifact.textHash !== originalHash || !latest.etag) {
-      return assessmentResult(latest || read, song, 'unknown', 'superseded');
-    }
-    const timestamp = new Date((deps.now || Date.now)()).toISOString();
-    const sourceLanguage = need.sourceLanguage || inferred;
-    const decision = buildLyricTranslationDecision(latest.artifact, effectiveSong, {
-      status: need.state === 'not_needed' ? 'not_needed' : 'needed', targetLanguage: target,
-      sourceLanguage, basis: inferred || sourceLanguage && !lyricLanguageTag(song.language) ? 'ai' : sourceLanguage ? 'tag' : 'rules',
-    });
-    assertRequestActive(signal);
-    const saved = await store.putIfMatch(song.id, { ...latest.artifact, translationDecision: decision,
-      aiCompletion: deps.keepPending ? latest.artifact.aiCompletion
-        : { status: 'completed', processingKey: completionKey(access?.config || deps.lyricConfig, target), updatedAt: timestamp },
-      updatedAt: timestamp }, latest.etag, { automation: latest.automation });
-    if (saved.state !== 'updated') return assessmentResult(await store.get(song.id), song, 'unknown', 'superseded');
-    assertRequestActive(signal);
-    const finished = inferred ? await finishWithInferredLanguage(store, db, song, saved, inferred, deps) : saved;
-    if (finished.artifact?.aiCompletion?.status === 'failed') return assessmentResult(finished, song, 'unknown', 'language_assessment_failed');
-    return assessmentResult(finished, effectiveSong, need.state, inferred ? 'ai_language' : need.reason, sourceLanguage);
-  } catch (error) {
-    assertRequestActive(signal);
-    if (/PLUGIN_|AUTH|LYRIC_RESULT_STALE|LYRIC_SONG_DELETED/u.test(String(error?.code || error?.message || ''))) throw error;
-    try { await access?.client.assertCurrent(); } catch { throw new Error('LYRIC_RESULT_STALE'); }
-    const diagnostic = safeLyricValidationDiagnostic(validationFailures.get(error));
-    return fail(String(error?.message || '').includes('TIMEOUT') ? 'language_assessment_timeout' : 'language_assessment_failed', diagnostic);
-  }
+    return await Promise.race([
+      access.client.ask(messages, options, { timeoutMs, signal: linked }),
+      new Promise((_resolve, reject) => {
+        interrupted = () => reject(controller.signal.aborted ? completionTimeoutError()
+          : signal?.reason || Object.assign(new Error('LYRIC_REQUEST_ABORTED'), { name: 'AbortError' }));
+        linked.addEventListener('abort', interrupted, { once: true });
+        if (linked.aborted) interrupted();
+        timer = setTimeout(() => controller.abort('model_timeout'), timeoutMs);
+      }),
+    ]);
+  } finally { clearTimeout(timer); linked.removeEventListener('abort', interrupted); }
+}
+
+function completionDecision(artifact, song, targetLanguage, need, sourceLanguage) {
+  return buildLyricTranslationDecision(artifact, song, { status: need, targetLanguage, sourceLanguage,
+    basis: !sourceLanguage ? 'rules' : lyricLanguageTag(song.language) ? 'tag' : 'ai' });
 }
 
 export async function runLyricAssetAiCompletion({ env, db, song, store, startedAt, textHash,
-  actorAccountId = null, force = false, retryContext = null, deps = {} }) {
+  actorAccountId = null, force = false, deps = {} }) {
   let access, lease, completionSnapshot;
+  const signal = requestSignal(deps);
   try {
+    assertRequestActive(signal);
     lease = deps.aiAccess?.lease || deps.aiLease || await createLyricsAiLease({ env,
       session: deps.session, context: deps.consumerContext, deps });
     if (!deps.aiAccess) await lease.assertCurrent();
   } catch { return { state: 'unavailable' }; }
   try {
     access = deps.aiAccess || await createLyricsAiAccess({ env, db, session: deps.session,
-      context: deps.consumerContext, signal: deps.signal, deps: { ...deps, aiLease: lease } });
+      context: deps.consumerContext, signal, deps: { ...deps, aiLease: lease } });
   } catch (error) {
     try { await lease.assertCurrent(); } catch { return { state: 'superseded' }; }
-    return conditionallyFinish(guardLyricsStore(store, lease.assertCurrent), song.id, startedAt, textHash,
-      current => ({ ...current, aiCompletion: { status: 'failed', errorCode: safeErrorCode(error) === 'request_budget_exhausted'
-        ? budgetFailureCode(retryContext || {}) : safeErrorCode(error),
+    return await conditionallyFinish(guardLyricsStore(store, lease.assertCurrent), song.id, startedAt, textHash,
+      current => ({ ...current, aiCompletion: { status: 'failed', errorCode: safeErrorCode(error),
         updatedAt: new Date((deps.now || Date.now)()).toISOString() } }));
   }
   db = access.db;
@@ -405,214 +287,136 @@ export async function runLyricAssetAiCompletion({ env, db, song, store, startedA
     completionSnapshot = read;
     if (read.state !== 'found' || read.artifact?.status !== 'ready' || read.artifact.textHash !== textHash
       || read.artifact.aiCompletion?.status !== 'pending' || read.artifact.aiCompletion.updatedAt !== startedAt) return { state: 'superseded' };
-    const config = access.config;
-    if (config.completionEnabled === false) return conditionallyFinish(store, song.id, startedAt, textHash,
+    const config = access.config, targetLanguage = config.targetLanguage || 'en';
+    if (config.completionEnabled === false) return await conditionallyFinish(store, song.id, startedAt, textHash,
       current => ({ ...current, aiCompletion: null }), read);
-    const targetLanguage = config.targetLanguage || 'en';
-    const prepared = await prepareLyricLanguage({ env, db, song, store, actorAccountId, targetLanguage,
-      deps: { ...deps, aiAccess: access, initialRead: read, keepPending: true, skipExistingTranslation: force } });
-    read = prepared.read;
-    completionSnapshot = read;
-    song = prepared.song;
-    if (prepared.need === 'unknown') return prepared.diagnostic ? { ...read, diagnostic: prepared.diagnostic } : read;
-    const translateLyrics = config.translateLyrics !== false && prepared.need === 'needed';
+    let need = dominantLyricTranslationNeed(read.artifact, song, { targetLanguage });
+    if (need.reason === 'invalid_target') throw markValidationFailure(new Error('INVALID_TARGET_LANGUAGE'), 'setup');
+    const translateLyrics = config.translateLyrics !== false;
     const cleanDirtyLyrics = config.cleanDirtyLyrics === true;
-    if (!translateLyrics && !cleanDirtyLyrics) {
+    if (need.state === 'unknown') {
+      // Direct/draft callers may already own a pending completion. Resolve its
+      // language separately, then acquire a new translation claim from that CAS.
+      const prepared = await prepareLyricLanguage({ env, db, song, store, targetLanguage,
+        deps: { ...deps, aiAccess: access, initialRead: read, checkCurrent: undefined,
+          ownedLanguagePendingAt: startedAt, retryFailed: true } });
+      if (prepared.need === 'unknown') return { ...prepared.read, state: prepared.reason === 'superseded' ? 'superseded' : 'failed' };
+      read = prepared.read;
+      need = dominantLyricTranslationNeed(read.artifact, song, { targetLanguage });
+      if (need.state === 'not_needed' && !cleanDirtyLyrics) return { ...read, state: 'updated' };
+      startedAt = new Date((deps.now || Date.now)()).toISOString();
+      const claimed = await store.putIfMatch(song.id, { ...read.artifact,
+        aiCompletion: { status: 'pending', updatedAt: startedAt }, updatedAt: startedAt }, read.etag, { automation: read.automation });
+      if (claimed.state !== 'updated') return { state: 'superseded' };
+      read = found(claimed); completionSnapshot = read;
+    }
+    const artifact = read.artifact;
+    const units = completionUnits(artifact.original, song);
+    if (need.state === 'not_needed' && !cleanDirtyLyrics || !translateLyrics && !cleanDirtyLyrics) {
       const timestamp = new Date((deps.now || Date.now)()).toISOString();
-      return conditionallyFinish(store, song.id, startedAt, textHash, current => ({ ...current,
+      return await conditionallyFinish(store, song.id, startedAt, textHash, current => ({ ...current,
+        ...(need.state === 'not_needed' ? { translationDecision: completionDecision(current, song, targetLanguage, 'not_needed', need.sourceLanguage) } : {}),
         aiCompletion: { status: 'completed', processingKey: completionKey(config, targetLanguage), updatedAt: timestamp }, updatedAt: timestamp }), read);
     }
-    return await completionDeadline(deps, async deadline => {
-      const artifact = read.artifact;
-      const units = completionUnits(artifact.original, song);
-      if (!units.length) throw markValidationFailure(new Error('NO_TRANSLATABLE_LINES'), 'setup');
-      const now = (deps.now || Date.now)();
-      const quota = await (deps.reserveDailyQuota || reserveDailyQuota)(db, dateKey(now), getDailyLyricCompletionLimit(env), now);
-      if (!quota) throw new Error('AI_QUOTA_EXHAUSTED');
-      const selectedCleanup = cleanDirtyLyrics ? cleanupUnits(artifact.original) : [];
-      const allowedCleanupIndices = new Set(selectedCleanup.map(row => row.index));
-      const discarded = new Set();
-      const translated = new Map();
-      const referenceByUnitId = config.referenceExistingTranslation && artifact.translation?.language === targetLanguage
-        ? new Map(artifact.translation.lines.map((text, unitId) => [unitId, text])) : null;
-      const compact = (config.source || config.provider) === 'deepseek' && ['deepseek-flash', 'deepseek-v4-pro'].includes(config.model);
-      const batches = translateLyrics ? validateCompletion(() => buildTranslationBatches(units, song.title, song.artist,
-        { targetLanguage, referenceByUnitId, ...(compact ? { maxUnits: 40 } : {}) }), 'setup') : [{ units, messages: [
-        { role: 'system', content: 'Perform only the explicitly requested lyric cleanup. Return exactly this JSON object: {"discardLineIndices":[0]}; no translations, language assessment or other fields.\n' + CLEANUP_INSTRUCTION },
-        { role: 'user', content: JSON.stringify({ cleanupUnits: selectedCleanup }) },
-      ] }];
-      let retriedInvalidJson = false;
-      for (const [index, batch] of batches.entries()) {
-        let messages = batch.messages;
-        if (cleanDirtyLyrics && translateLyrics && index === 0) messages = [
-          { ...messages[0], content: messages[0].content + '\n\n' + CLEANUP_INSTRUCTION },
-          ...messages.slice(1, -1),
-          { ...messages.at(-1), content: JSON.stringify({ ...JSON.parse(messages.at(-1).content), cleanupUnits: selectedCleanup }) },
-        ];
-        const parse = response => validateCompletion(() => parseLanguageAwareTranslationResponse(response, batch.units,
-          { targetLanguage, allowedCleanupIndices: cleanDirtyLyrics && index === 0 ? allowedCleanupIndices : undefined,
-            analysisOnly: !translateLyrics }), 'validation', index);
-        let parsed;
-        try { parsed = parse(await askModel(access, messages, deadline)); }
-        catch (error) {
-          if (error?.message !== 'INVALID_JSON' || retriedInvalidJson) throw error;
-          retriedInvalidJson = true;
-          parsed = parse(await askModel(access, messages.map((message, i) => i ? message : { ...message,
-            content: message.content + '\nReturn syntactically valid JSON only. Repeat the original task; no explanation.' }), deadline));
-        }
-        parsed.discardLineIndices.forEach(value => discarded.add(value));
-        parsed.translations?.forEach(({ unitId, text }) => translated.set(unitId, text));
+    if (!units.length) throw markValidationFailure(new Error('NO_TRANSLATABLE_LINES'), 'setup');
+    const now = (deps.now || Date.now)();
+    const quota = await (deps.reserveDailyQuota || reserveDailyQuota)(db, dateKey(now), getDailyLyricCompletionLimit(env), now);
+    if (!quota) throw new Error('AI_QUOTA_EXHAUSTED');
+    assertRequestActive(signal);
+    const selectedCleanup = cleanDirtyLyrics ? cleanupUnits(artifact.original) : undefined;
+    const allowedCleanupIndices = selectedCleanup && new Set(selectedCleanup.map(row => row.index));
+    const format = { targetLanguage, sourceLanguage: need.sourceLanguage, translateLyrics, allowedCleanupIndices };
+    const referenceByUnitId = config.referenceExistingTranslation && artifact.translation?.language === targetLanguage
+      ? new Map(artifact.translation.lines.map((text, unitId) => [unitId, text])) : null;
+    const messages = validateCompletion(() => buildWholeSongCompletionPrompt(units, song,
+      { ...format, referenceByUnitId, cleanupUnits: selectedCleanup }), 'setup');
+    let candidate;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      // Only locally verified output failures get the one repair request.
+      // Network, provider, timeout and quota errors leave this loop directly.
+      const response = await askModel(access, attempt ? messages.map((message, index) => index ? message : { ...message,
+        content: message.content + '\nThe previous output failed validation. Repeat the entire original task with complete coverage and valid JSON only.' }) : messages, deps);
+      assertRequestActive(signal);
+      try {
+        const parsed = validateCompletion(() => parseWholeSongCompletionResponse(response, units, format), 'validation');
+        candidate = await validateCompletion(async () => {
+          const completedAt = new Date((deps.now || Date.now)()).toISOString();
+          const translated = new Map((parsed.translations || []).map(({ unitId, text }) => [unitId, text]));
+          const next = await applySuggestedCleanup({ ...artifact,
+            ...(parsed.translations ? { translation: { source: 'ai', kind: 'ai', originalTextHash: textHash,
+              lines: artifact.original.lines.map((_line, index) => translated.get(index) || ''),
+              language: targetLanguage, updatedAt: completedAt } } : {}),
+          }, parsed.discardLineIndices, completedAt, song, completionKey(config, targetLanguage));
+          next.translationDecision = completionDecision(next, song, targetLanguage,
+            parsed.translations ? 'translated' : parsed.needed ? 'needed' : 'not_needed', parsed.sourceLanguage);
+          if (parsed.translations && !projectLyricArtifact(next, { song, targetLanguage })?.translation) throw new Error('INVALID_TRANSLATION_OUTPUT');
+          return next;
+        }, 'finalization');
+        break;
+      } catch (error) {
+        if (attempt || !validationFailures.has(error)) throw error;
       }
-      if (translateLyrics && translated.size !== units.length) throw markValidationFailure(new Error('INVALID_COVERAGE'), 'finalization');
-      access.budget?.settle();
-      const completedAt = new Date((deps.now || Date.now)()).toISOString();
-      return conditionallyFinish(store, song.id, startedAt, textHash, current => validateCompletion(async () => {
-        const next = await applySuggestedCleanup({ ...current,
-          ...(translateLyrics ? { translation: { source: 'ai', kind: 'ai', originalTextHash: textHash,
-            lines: artifact.original.lines.map((_line, index) => translated.get(index) || ''),
-            language: targetLanguage, updatedAt: completedAt } } : {}),
-        }, [...discarded], completedAt, song, completionKey(config, targetLanguage));
-        const previous = read.artifact.translationDecision;
-        next.translationDecision = buildLyricTranslationDecision(next, song, { status: translateLyrics ? 'translated' : prepared.need === 'needed' ? 'needed' : 'not_needed',
-          targetLanguage, sourceLanguage: prepared.language, basis: previous?.basis || 'tag' });
-        if (translateLyrics && !projectLyricArtifact(next, { song, targetLanguage })?.translation) throw new Error('INVALID_TRANSLATION_OUTPUT');
-        return next;
-      }, 'finalization'), read);
-    });
+    }
+    assertRequestActive(signal);
+    // Publish only the complete translated result. Preparation may already have
+    // saved its independent language decision, but never a partial translation.
+    return await conditionallyFinish(store, song.id, startedAt, textHash, () => candidate, read);
   } catch (error) {
-    access.budget?.settle();
+    if (signal?.aborted) return { state: 'superseded' };
     try { await access.client.assertCurrent(); } catch { return { state: 'superseded' }; }
     const failedAt = new Date((deps.now || Date.now)()).toISOString();
-    const failureCode = access.budget?.depleted ? 'request_budget_exhausted' : safeErrorCode(error);
     const failed = await conditionallyFinish(store, song.id, startedAt, textHash, current => ({ ...current,
-      aiCompletion: { status: 'failed', errorCode: failureCode === 'request_budget_exhausted'
-        ? budgetFailureCode(retryContext || {}) : failureCode, updatedAt: failedAt }, updatedAt: failedAt }), completionSnapshot);
-    const diagnostic = !access.budget?.depleted && safeLyricValidationDiagnostic(validationFailures.get(error));
+      aiCompletion: { status: 'failed', errorCode: safeErrorCode(error), updatedAt: failedAt }, updatedAt: failedAt }), completionSnapshot);
+    const diagnostic = safeLyricValidationDiagnostic(validationFailures.get(error));
     return failed.state === 'updated' && diagnostic ? { ...failed, diagnostic } : failed;
   }
 }
 
-export async function beginLyricAssetAiCompletion({
-  env,
-  db,
-  song,
-  store,
-  actorAccountId = null,
-  force = false,
-  targetLanguage = null,
-  automatic = false,
-  deps = {},
-}) {
+export async function beginLyricAssetAiCompletion({ env, db, song, store, actorAccountId = null,
+  force = false, targetLanguage = null, automatic = false, deps = {} }) {
+  const signal = requestSignal(deps); assertRequestActive(signal);
   let access = deps.aiAccess || await createLyricsAiAccess({ env, db, session: deps.session,
-    context: deps.consumerContext, signal: deps.signal, deps });
-  // Automatic work may inherit an old cleanup preference, but only an explicit
-  // current workbench cleanup action authorizes deleting original rows.
-  if (automatic) access = { ...access, config: { ...access.config, cleanDirtyLyrics: false } };
+    context: deps.consumerContext, signal, deps });
+  const effectiveTarget = targetLanguage || access.config.targetLanguage || 'en';
+  access = { ...access, config: { ...access.config, targetLanguage: effectiveTarget,
+    ...(automatic ? { cleanDirtyLyrics: false } : {}) } };
   db = access.db;
   store = guardLyricsStore(store, access.client.assertCurrent);
-  // Internal source adapters may reuse their already authorized snapshot. The
-  // pending write below still CAS-checks its ETag before any AI work starts.
   const read = deps.initialRead || await store.get(song.id);
   let current = deps.checkCurrent ? await deps.checkCurrent(read) : read;
-  if (current.state !== 'found' || current.artifact.status !== 'ready') {
-    return { state: 'missing', task: null };
-  }
-  const effectiveTarget = targetLanguage || access.config.targetLanguage || 'en';
-  if (access.config.translateLyrics !== false && access.config.cleanDirtyLyrics !== true
-    && hasCurrentLyricNoTranslationDecision(current.artifact, song, { targetLanguage: effectiveTarget })) {
-    return { state: 'not_needed', song, artifact: current.artifact, etag: current.etag, task: null };
-  }
-  const now = (deps.now || Date.now)();
-  if (isFreshLyricAiPending(current.artifact.aiCompletion, now)) {
-    return { state: 'pending', artifact: current.artifact, etag: current.etag, task: null };
-  }
-  const activeLayer = projectLyricArtifact(current.artifact, { song,
-    targetLanguage: targetLanguage || access.config.targetLanguage || 'en' })?.translation;
-  if (!force && activeLayer) {
-    return { state: 'already_translated', artifact: current.artifact, etag: current.etag, task: null };
-  }
-
+  assertRequestActive(signal);
+  if (current.state !== 'found' || current.artifact.status !== 'ready') return { state: 'missing', task: null };
+  if (isFreshLyricAiPending(current.artifact.aiCompletion, (deps.now || Date.now)())) return { state: 'pending', artifact: current.artifact, etag: current.etag, task: null };
+  if (!automaticCompletionAllowed(current.artifact.aiCompletion, automatic)) return { state: 'failed', song, artifact: current.artifact, etag: current.etag, task: null };
+  if (!force && projectLyricArtifact(current.artifact, { song, targetLanguage: effectiveTarget })?.translation) return { state: 'already_translated', artifact: current.artifact, etag: current.etag, task: null };
   if (access.config.completionEnabled === false) return { state: 'unavailable', artifact: current.artifact, etag: current.etag, task: null };
-  // Resolve the actual saved model before comparing scope, but do not prepare
-  // language, reserve quota or mutate the asset until this gate permits work.
-  const retryScope = await budgetRetryScope({ artifact: current.artifact, song, targetLanguage: effectiveTarget,
-    config: access.config, identity: access.client.identity });
-  const retry = automaticBudgetRetry({ completion: current.artifact.aiCompletion, scope: retryScope, automatic, now });
-  if (!retry.allowed) return { state: 'failed', song, artifact: current.artifact, etag: current.etag, task: null };
-  // One request owns one pending claim across preparation and translation.
-  // Keep that claim while recording the assessment instead of settling it and
-  // immediately issuing an identical second pending write.
-  let classificationClaim = null;
-  if (budgetFailureState(current.artifact.aiCompletion) || current.artifact.aiCompletion?.status === 'pending'
-    || dominantLyricTranslationNeed(current.artifact, song, { targetLanguage: effectiveTarget }).state === 'unknown') {
-    const claimedAt = new Date((deps.now || Date.now)()).toISOString();
-    access.budget?.requireSettlementRoom();
-    const claimed = await store.putIfMatch(song.id, { ...current.artifact,
-      aiCompletion: { status: 'pending', updatedAt: claimedAt }, updatedAt: claimedAt }, current.etag,
-    { automation: automatic ? current.automation : undefined });
-    if (claimed.state !== 'updated') {
-      const winner = await store.get(song.id);
-      return winner.state === 'found' && isFreshLyricAiPending(winner.artifact?.aiCompletion, now)
-        ? { state: 'pending', artifact: winner.artifact, etag: winner.etag, task: null } : { state: 'conflict', task: null };
-    }
-    current = { ...claimed, state: 'found' };
-    classificationClaim = { startedAt: claimedAt, textHash: claimed.artifact.textHash };
+  let need = dominantLyricTranslationNeed(current.artifact, song, { targetLanguage: effectiveTarget });
+  if (need.state === 'unknown') {
+    const prepared = await prepareLyricLanguage({ env, db, song, store, targetLanguage: effectiveTarget,
+      deps: { ...deps, aiAccess: access, initialRead: current, checkCurrent: undefined, retryFailed: !automatic } });
+    current = prepared.read;
+    if (prepared.need === 'unknown') return { state: prepared.reason === 'pending' ? 'pending'
+      : prepared.reason === 'unavailable' ? 'unavailable' : prepared.reason === 'superseded' ? 'conflict' : 'failed',
+      song, artifact: current.artifact, etag: current.etag, task: null };
+    need = dominantLyricTranslationNeed(current.artifact, song, { targetLanguage: effectiveTarget });
   }
-  const prepared = await prepareLyricLanguage({ env, db, song, store, actorAccountId, targetLanguage: effectiveTarget,
-    deps: { ...deps, aiAccess: access, initialRead: current, skipExistingTranslation: force,
-      keepPending: Boolean(classificationClaim) } });
-  current = prepared.read;
-  song = prepared.song;
-  if (prepared.reason === 'superseded') return { state: 'conflict', task: null };
-  if (prepared.need === 'unknown') return { state: current.artifact?.aiCompletion?.status === 'pending' ? 'pending' : 'failed',
-    artifact: current.artifact, etag: current.etag, diagnostic: prepared.diagnostic, task: null };
-  if (prepared.need === 'not_needed' && access.config.cleanDirtyLyrics !== true) {
-    if (classificationClaim) {
-      const completedAt = new Date((deps.now || Date.now)()).toISOString();
-      const completed = await conditionallyFinish(store, song.id, classificationClaim.startedAt, classificationClaim.textHash,
-        artifact => ({ ...artifact, aiCompletion: { status: 'completed', processingKey: completionKey(access.config, effectiveTarget), updatedAt: completedAt }, updatedAt: completedAt }));
-      if (completed.state !== 'updated') return { state: 'conflict', task: null };
-      current = { ...completed, state: 'found' };
-    }
-    return { state: 'not_needed', song, artifact: current.artifact, etag: current.etag, task: null };
+  if (need.state === 'not_needed' && access.config.cleanDirtyLyrics !== true) {
+    if (hasCurrentLyricNoTranslationDecision(current.artifact, song, { targetLanguage: effectiveTarget })) return { state: 'not_needed', song, artifact: current.artifact, etag: current.etag, task: null };
+    const timestamp = new Date((deps.now || Date.now)()).toISOString();
+    const next = { ...current.artifact, translationDecision: completionDecision(current.artifact, song, effectiveTarget, 'not_needed', need.sourceLanguage),
+      aiCompletion: { status: 'completed', processingKey: completionKey(access.config, effectiveTarget), updatedAt: timestamp }, updatedAt: timestamp };
+    const saved = await store.putIfMatch(song.id, next, current.etag, { automation: current.automation });
+    return saved.state === 'updated' ? { ...saved, state: 'not_needed', song, task: null } : { state: 'conflict', task: null };
   }
-  const retryContext = { consumed: retry.consumed, scope: await budgetRetryScope({ artifact: current.artifact,
-    song, targetLanguage: effectiveTarget, config: access.config, identity: access.client.identity }) };
-  const startedAt = classificationClaim?.startedAt || new Date((deps.now || Date.now)()).toISOString();
-  const pending = {
-    ...current.artifact,
-    aiCompletion: { status: 'pending', updatedAt: startedAt },
-    updatedAt: startedAt,
-  };
-  access.budget?.requireSettlementRoom();
-  const written = classificationClaim ? current : await store.putIfMatch(song.id, pending, current.etag,
+  const startedAt = new Date((deps.now || Date.now)()).toISOString();
+  const written = await store.putIfMatch(song.id, { ...current.artifact, aiCompletion: { status: 'pending', updatedAt: startedAt }, updatedAt: startedAt }, current.etag,
     { automation: automatic ? current.automation : undefined });
-  if (written.state === 'conflict') {
+  if (written.state !== 'updated') {
     const winner = await store.get(song.id);
-    if (winner.state === 'found'
-      && winner.artifact.status === 'ready'
-      && isFreshLyricAiPending(winner.artifact.aiCompletion, now)) {
-      return { state: 'pending', artifact: winner.artifact, etag: winner.etag, task: null };
-    }
-    return { state: 'conflict', task: null };
+    return winner.state === 'found' && winner.artifact?.aiCompletion?.status === 'pending'
+      ? { state: 'pending', artifact: winner.artifact, etag: winner.etag, task: null } : { state: 'conflict', task: null };
   }
-  return {
-    state: 'started',
-    song,
-    artifact: written.artifact,
-    etag: written.etag,
-    automation: written.automation,
-    task: runLyricAssetAiCompletion({
-      env,
-      db,
-      song,
-      store,
-      startedAt,
-      textHash: written.artifact.textHash,
-      actorAccountId,
-      force,
-      retryContext,
-      deps: { ...deps, aiAccess: access, initialRead: { ...written, state: 'found' } },
-    }),
-  };
+  return { state: 'started', song, artifact: written.artifact, etag: written.etag, automation: written.automation,
+    task: runLyricAssetAiCompletion({ env, db, song, store, startedAt, textHash: written.artifact.textHash,
+      actorAccountId, force, deps: { ...deps, aiAccess: access, initialRead: { ...written, state: 'found' } } }) };
 }

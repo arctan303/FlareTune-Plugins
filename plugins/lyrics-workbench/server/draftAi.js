@@ -27,10 +27,7 @@ export async function completeLyricDraft({ env, db, song, lines, translationLang
   const finished = await runLyricAssetAiCompletion({
     env, db, song, store, startedAt, textHash: artifact.textHash,
     actorAccountId, force: true,
-    deps: {
-      ...deps,
-      updateSongLanguage: async (_songId, language) => { inferredLanguage = language; },
-    },
+    deps,
   });
   if (finished.state === 'unavailable' || finished.state === 'superseded' || artifact.aiCompletion?.status === 'pending') {
     return { status: 'failed', errorCode: 'completion_superseded' };
@@ -41,11 +38,8 @@ export async function completeLyricDraft({ env, db, song, lines, translationLang
       ...(diagnostic ? { diagnostic } : {}) };
   }
   inferredLanguage ||= artifact.translationDecision?.sourceLanguage || null;
-  // Local completion binds its decision to the inferred tag without writing
-  // that tag from a draft. Virtual songs retain their original tag scope.
-  const projectionSong = inferredLanguage && !/^yt:[A-Za-z0-9_-]{11}$/u.test(song.id)
-    ? { ...song, language: inferredLanguage } : song;
-  const projected = projectLyricArtifact(artifact, { song: projectionSong,
+  // Inference belongs to the lyric result/receipt, not a catalog mutation.
+  const projected = projectLyricArtifact(artifact, { song,
     targetLanguage: artifact.translationDecision?.targetLanguage || null });
   const translations = projected?.translation?.lines || [];
   const receipt = await createLyricDraftReceipt(env, { songId: song.id, accountId: actorAccountId,

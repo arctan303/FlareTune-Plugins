@@ -8,7 +8,7 @@ const MODES = { word: '逐字', line: '逐行', none: '无时间轴' };
 const keyOf = (value) => `${value?.source || ''}:${value?.providerLyricId || ''}`;
 const BATCH_SIZE = 4;
 
-export default function LyricsCandidatePanel({ song, authenticated, isAdmin, saving, api: lyricsWorkspaceApi,
+export default function LyricsCandidatePanel({ song, authenticated, canEdit, saving, api: lyricsWorkspaceApi,
   onImport, Preview, currentTime, followsPlayback, active = true }) {
   const [title, setTitle] = React.useState(song.title || '');
   const [artist, setArtist] = React.useState(song.artist || '');
@@ -228,7 +228,7 @@ export default function LyricsCandidatePanel({ song, authenticated, isAdmin, sav
         </div>
         {inspection?.state === 'error' && <button type="button" disabled={inspecting.length > 0 || inspection.error?.retryAt > clock}
           onClick={() => void inspect([selected])}>{inspection.error?.retryAt > clock ? retryLabel(inspection.error.retryAt) : t('重试预览')}</button>}
-        {isAdmin && <button type="button" className="is-primary" disabled={inspection?.state !== 'ready' || saving}
+        {canEdit && <button type="button" className="is-primary" disabled={inspection?.state !== 'ready' || saving}
           onClick={() => onImport(inspection)}>{t('导入当前歌词草稿')}</button>}
       </div>
       {inspection?.state === 'ready' ? <Preview key={keyOf(selected)} value={inspection} currentTime={currentTime} followsPlayback={followsPlayback} />

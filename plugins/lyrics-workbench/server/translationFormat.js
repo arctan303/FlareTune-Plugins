@@ -11,10 +11,7 @@ import { computeHash } from "@flaretune/plugin-sdk/server/lyric-parsing";
 
 const LRC_TIMESTAMP_ANY_PATTERN = /\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?\]/;
 const TRANSLATION_PROMPT_VERSION = 'lyrics-1.0.0-translation';
-const DEFAULT_MAX_BATCH_UNITS = 120;
-const DEFAULT_MAX_BATCH_CHARACTERS = 12_000;
-const DEFAULT_CONTEXT_UNITS = 4;
-function createSystemPrompt(targetLanguage = 'en') {
+export function lyricTranslationStyle(targetLanguage = 'en') {
   if (!isTranslationTarget(targetLanguage)) throw new Error('INVALID_TARGET_LANGUAGE');
   const target = translationTargetEnglishName(targetLanguage);
   const script = targetLanguage === 'zh' ? '使用简体中文；不要输出繁体字。'
@@ -22,12 +19,16 @@ function createSystemPrompt(targetLanguage = 'en') {
       : targetLanguage === 'ja' ? '日本語として自然な語順・表記・慣用表現を使い、固有名詞は文脈に応じて扱う。'
         : targetLanguage === 'ko' ? '자연스러운 한국어 어순과 표현을 사용하고 적절한 한글 표기를 유지한다.'
           : 'Use the target language’s natural grammar, vocabulary, idioms and writing conventions.';
-  return `你是一位资深歌词译者与编辑。请把 units 中实际演唱的歌词译成 ${target}（${targetLanguage}）。结合 title、artist 和相邻 context 理解整首歌，但不得把资料当歌词。以信、达、雅为共同质量标准，所有目标语言遵循同一要求：
+  return `你是一位资深歌词译者与编辑。需要翻译时，请把 units 中实际演唱的歌词译成 ${target}（${targetLanguage}）。结合 title、artist 和相邻 context 理解整首歌，但不得把资料当歌词。以信、达、雅为共同质量标准，所有目标语言遵循同一要求：
 1. 忠实：保留主体、否定、时态、指代、意象、情绪和叙事关系，不擅自增删。
 2. 自然：使用目标语言习惯的语序和省略，避免逐词硬译、机械重复和原语言残句。
 3. 表达：在不改变原意的前提下保留歌词语气、修辞、节奏与诗性。
 4. 连贯：跨行语义要参考上下文，每个 text 仍只承载对应原行，不合并或拆分单元。
-目标书写要求：${script}
+目标书写要求：${script}`;
+}
+
+function createSystemPrompt(targetLanguage) {
+  return lyricTranslationStyle(targetLanguage) + `
 
 严格规则：歌曲需要翻译已由上游独立确定，本角色只翻译，不重新判断语言或是否需要翻译。只处理 units；context、title、artist 仅供理解。referenceTranslations 可能有误，原文始终优先。返回且仅返回 JSON 对象 {"translations":[{"unitId":0,"text":"译文"}]}，与 units 等长，每个 unitId 恰好出现一次。不得返回songLanguage、unitLanguages、segments或notNeeded。不得输出时间戳、Markdown、署名、解释或多余段落，不修改原文或时间。名字、口号与拟声可按目标语言语境保留，但不能把整份外语正文原样返回。`;
 }
@@ -57,49 +58,6 @@ export function buildTranslationPrompt(
       }),
     },
   ];
-}
-
-export function buildTranslationBatches(
-  parsedLines,
-  songTitle = '',
-  artist = '',
-  {
-    maxUnits = DEFAULT_MAX_BATCH_UNITS,
-    maxCharacters = DEFAULT_MAX_BATCH_CHARACTERS,
-    contextUnits = DEFAULT_CONTEXT_UNITS,
-    targetLanguage = 'zh',
-    referenceByUnitId = null,
-  } = {},
-) {
-  if (!Array.isArray(parsedLines) || parsedLines.length === 0) throw new Error('NO_TRANSLATABLE_LINES');
-  if (maxUnits < 1 || maxCharacters < 1) throw new Error('INVALID_BATCH_LIMIT');
-
-  const ranges = [];
-  let start = 0;
-  while (start < parsedLines.length) {
-    let end = start;
-    let characters = 0;
-    while (end < parsedLines.length && end - start < maxUnits) {
-      const nextCharacters = parsedLines[end].text.length;
-      if (end > start && characters + nextCharacters > maxCharacters) break;
-      characters += nextCharacters;
-      end += 1;
-    }
-    if (end === start) end += 1;
-    ranges.push([start, end]);
-    start = end;
-  }
-
-  return ranges.map(([rangeStart, rangeEnd]) => {
-    const units = parsedLines.slice(rangeStart, rangeEnd);
-    const contextBefore = parsedLines.slice(Math.max(0, rangeStart - contextUnits), rangeStart);
-    const contextAfter = parsedLines.slice(rangeEnd, Math.min(parsedLines.length, rangeEnd + contextUnits));
-    return {
-      units,
-      messages: buildTranslationPrompt(units, songTitle, artist,
-        { contextBefore, contextAfter, targetLanguage, referenceByUnitId }),
-    };
-  });
 }
 
 function unwrapJsonFence(value) {

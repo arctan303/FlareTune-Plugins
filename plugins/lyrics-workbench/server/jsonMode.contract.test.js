@@ -11,6 +11,7 @@ const bundled = await build({
     export { askAI } from '../../ai-gateway/server/ai.js';
     export * from './translationFormat.js';
     export * from './languageAssessment.js';
+    export * from './completionFormat.js';
     export * from './translation.js';
     export { buildReadyLyricArtifact } from '@flaretune/plugin-sdk/server/lyric-workflow';
   `, resolveDir: fileURLToPath(new URL('.', import.meta.url)), loader: 'js' },
@@ -66,12 +67,18 @@ test('25-unit translation succeeds on the first real gateway JSON-mode request',
   assert.deepEqual(translated.map(row => row.unitId), units.map(row => row.unitId));
 });
 
-test('dominant-language classification already satisfies the real gateway JSON contract', async t => {
-  const calls = strictDeepSeek(t, () => ({ language: 'en', match: 0.99 }));
-  const original = { lines: [{ time: 1, text: 'I wait beside the window' }, { time: 4, text: 'I will see you again' }] };
-  const response = await runtime.askAI(runtime.buildLanguageAssessmentPrompt(original, { title: 'Fixture' }), config, env);
-  assertOneJsonCall(calls, 2);
-  assert.deepEqual(runtime.parseLanguageAssessmentResponse(response), { language: 'en', match: 0.99 });
+test('standalone classification and subsequent whole-song translation each satisfy real gateway JSON mode', async t => {
+  const units = [{ unitId: 0, text: 'I wait beside the window' }, { unitId: 1, text: 'I will see you again' }];
+  const calls = strictDeepSeek(t, payload => payload.languageTable ? { language: 'en', match: 0.99 }
+    : { translations: payload.units.map(unit => ({ unitId: unit.unitId, text: '我在窗边等你' })) });
+  const assessed = await runtime.askAI(runtime.buildLanguageAssessmentPrompt({ lines: units.map(unit => ({ text: unit.text })) }, { title: 'Fixture' }), config, env);
+  const language = runtime.parseLanguageAssessmentResponse(assessed).language;
+  assert.equal(language, 'en'); assertOneJsonCall(calls, 2);
+  const messages = runtime.buildWholeSongCompletionPrompt(units, { title: 'Fixture' }, { targetLanguage: 'zh', sourceLanguage: language });
+  const response = await runtime.askAI(messages, config, env);
+  assert.equal(calls.length, 2); assert.ok(calls.every(call => call.hasJson && call.format === 'json_object'));
+  const result = runtime.parseWholeSongCompletionResponse(response, units, { targetLanguage: 'zh', sourceLanguage: language });
+  assert.equal(result.sourceLanguage, 'en'); assert.equal(result.translations.length, 2);
 });
 
 test('explicit cleanup-only completes through the real gateway on its first JSON-mode request', async t => {

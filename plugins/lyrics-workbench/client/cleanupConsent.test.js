@@ -46,7 +46,7 @@ test('draft translation preserves all original lines by default and never claims
   assert.equal(f.notices.at(-1), workbenchMessage('draftCompleted', 'en'));
   assert.equal(cleanupToggle(tree).props.checked, false); assert.equal(f.saves.length, 0); f.component.unmount();
 });
-test('explicit administrator cleanup applies only to one draft invocation and uses its own result message', async () => {
+test('explicit cleanup applies only to one draft invocation and uses its own result message', async () => {
   const f = fixture(); button(f.render(), '编辑歌词').props.onClick(); let tree = f.render();
   cleanupToggle(tree).props.onChange({ target: { checked: true } }); tree = f.render();
   button(tree, 'AI 补全').props.onClick(); await flushAsync(); tree = f.render();
@@ -68,11 +68,13 @@ test('cleanup consent participates in unsaved-change guarding and resets on canc
   nodes(tree).find(node => node.type === 'candidates').props.onImport({ lyrics: { lines: original } }); tree = f.render();
   assert.equal(cleanupToggle(tree).props.checked, false); f.component.unmount();
 });
-test('members never see draft cleanup and ordinary translation stays available without it', async () => {
+test('members can edit and workbench translation starts a draft without a shared write', async () => {
   const f = fixture({ role: 'member' }); const tree = f.render();
   assert.equal(cleanupToggle(tree), undefined);
-  assert.equal(nodes(tree).some(node => node.type === 'button' && node.props.children.includes('编辑歌词')), false);
-  button(tree, 'AI 补全').props.onClick(); await flushAsync(); assert.deepEqual(f.requests, ['ordinary']); f.component.unmount();
+  assert.ok(button(tree, '编辑歌词'));
+  button(tree, 'AI 补全').props.onClick(); await flushAsync();
+  assert.equal(f.requests.length, 1); assert.equal(f.requests[0].cleanDirtyLyrics, false);
+  assert.equal(cleanupToggle(f.render()).props.checked, false); assert.equal(f.saves.length, 0); f.component.unmount();
 });
 test('cleanup controls and result messages have package-owned text for all five locales', () => {
   const labels = new Set();
@@ -83,9 +85,9 @@ test('cleanup controls and result messages have package-owned text for all five 
   }
   assert.equal(labels.size, 5);
 });
-test('the workspace API sends cleanup consent only on admin draft calls and defaults it to false', async () => {
+test('the workspace API sends cleanup consent on member draft calls and defaults it to false', async () => {
   const requests = [];
-  const host = { isCurrent: () => true, session: { get: () => ({ user: { role: 'admin' } }) },
+  const host = { isCurrent: () => true, session: { get: () => ({ user: { role: 'member' } }) },
     features: { isAvailable: () => true }, request: async (...args) => { requests.push(args); return { ok: true }; } };
   const api = createLyricsWorkspaceApi(host);
   await api.completeDraftLyrics('one', { lines: original, etag: 'v1' });

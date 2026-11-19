@@ -62,7 +62,7 @@ export function useManagedLyricsAsset({ host, api, songId, enabled }) {
   }, [api, current, owner, host, refreshPlayback, songId]);
   const startPolling = React.useCallback(() => {
     if (!current() || host.features?.isAvailable?.('ai') === false || pollingRef.current === owner) return;
-    pollingRef.current = owner; deadlineRef.current = Date.now() + 120000;
+    pollingRef.current = owner; deadlineRef.current = Date.now() + 210000;
     setIsAiCompleting(true);
     const schedule = () => {
       if (!current() || pollingRef.current !== owner) return;
@@ -102,7 +102,7 @@ export function useManagedLyricsAsset({ host, api, songId, enabled }) {
     if (current() && state.aiCompletionEnabled && (state.asset?.aiCompletion?.status === 'pending' || state.lyrics?.translationState === 'pending')) startPolling();
   }, [current, startPolling, state.aiCompletionEnabled, state.asset?.aiCompletion?.status, state.lyrics?.translationState]);
 
-  const runMutation = React.useCallback(async (action, successMessage, { refreshPlayer = true, conflictResult = false } = {}) => {
+  const runMutation = React.useCallback(async (action, successMessage, { refreshPlayer = true, conflictResult = false, conflictMessage = null } = {}) => {
     if (!current() || owner.saving) return false;
     owner.saving = true; setState(value => ({ ...value, saving: true, error: '' }));
     try {
@@ -116,7 +116,8 @@ export function useManagedLyricsAsset({ host, api, songId, enabled }) {
       return true;
     } catch (error) {
       if (!current()) return false;
-      const message = errorMessage(error, '更新歌词文件失败');
+      const message = error?.status === 409 && error?.code === 'LYRIC_ASSET_CONFLICT' && conflictMessage
+        ? conflictMessage : errorMessage(error, '更新歌词文件失败');
       if (error?.status === 409 && error?.code === 'LYRIC_ASSET_CONFLICT') await load({ quiet: true });
       if (!current()) return false;
       setState(value => ({ ...value, error: message })); notify(message);
@@ -129,8 +130,10 @@ export function useManagedLyricsAsset({ host, api, songId, enabled }) {
   return { ...state, isAiCompleting, load,
     updateOffset: offsetMs => runMutation(() => api.updateLyricsOffset(songId, { offsetMs, etag: state.etag }), t('歌词偏移已设为 {p0}ms', { p0: offsetMs })),
     shiftTimeline: deltaMs => runMutation(() => api.shiftLyricsTimeline(songId, { deltaMs, etag: state.etag }), '已将位移写入当前歌词时间轴'),
-    saveDocument: (lines, baselineEtag = state.etag, aiReceipt = null, translationLanguage = null) => runMutation(
-      () => api.saveLyricsDocument(songId, { lines, etag: baselineEtag, aiReceipt, translationLanguage }), '共享歌词已更新', { conflictResult: 'conflict' }),
+    saveDocument: (lines, baselineEtag = state.etag, aiReceipt = null, translationLanguage = null, options = {}) => runMutation(
+      () => api.saveLyricsDocument(songId, { lines, etag: baselineEtag, aiReceipt, translationLanguage,
+        ...(options.restoreAsset ? { restoreAsset: options.restoreAsset } : {}), ...(options.reset === true ? { reset: true } : {}) }),
+      '共享歌词已更新', { conflictResult: 'conflict', conflictMessage: '共享歌词已在别处更新，草稿已保留。' }),
     importLrc: lrc => runMutation(() => api.importLyricsLrc(songId, { lrc, etag: state.etag }), 'LRC 已导入为当前歌词'),
     restoreBackup: asset => runMutation(() => api.restoreLyricsBackup(songId, { asset, etag: state.etag }), '歌词备份已恢复'),
     completeTranslation: async () => {
