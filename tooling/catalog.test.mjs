@@ -67,7 +67,7 @@ test('stable catalog retains every baseline identity and its explicitly declared
   await validateArtifacts(catalog);
 });
 
-test('development catalog preserves every previous entry and its explicitly added API4 releases',async()=>{
+test('development catalog preserves every previous entry and each addition declares its required host API',async()=>{
   let catalog;
   try {catalog=await readCatalog('catalogs/development.json');} catch(error){if(error.code==='ENOENT')return;throw error;}
   const baseline=await readCatalog('tooling/catalog-baselines.json');
@@ -77,7 +77,8 @@ test('development catalog preserves every previous entry and its explicitly adde
   }
   for(const identity of baseline.developmentAdditions) {
     assert.equal(catalog.plugins.find(row=>key(row)===identity).manifest.hostApiVersion,
-      ['lyrics-workbench@0.9.0','lyrics-workbench@0.9.1','lyrics-workbench@1.0.0','lyrics-workbench@1.0.1','lyrics-workbench@1.0.2','lyrics-workbench@1.0.3'].includes(identity) ? 5 : 4);
+      ['ai-gateway@0.2.3','lyrics-workbench@1.1.0'].includes(identity) ? 6
+        : ['lyrics-workbench@0.9.0','lyrics-workbench@0.9.1','lyrics-workbench@1.0.0','lyrics-workbench@1.0.1','lyrics-workbench@1.0.2','lyrics-workbench@1.0.3'].includes(identity) ? 5 : 4);
   }
   assert.ok(catalog.plugins.some(row=>key(row)==='lyrics-workbench@0.3.1'));
   assert.ok(catalog.plugins.some(row=>key(row)==='youtube-music@0.2.1'));
