@@ -7,13 +7,28 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    env:
+      FLARETUNE_TEST_HOST_ROOT: ${{ github.workspace }}/.test-host
     steps:
       - uses: actions/checkout@v4
+      - name: Check out the reviewed host test capabilities
+        uses: actions/checkout@v4
+        with:
+          repository: arctan303/FlareTune
+          ref: 3dafdec9e7b2c16454aaf831694bf223d7404ae5
+          path: .test-host
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '24.11.0'
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            .test-host/package-lock.json
       - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install the host's locked test capabilities
+        run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: .test-host
       - run: npm test
       - run: npm run artifacts:build
       - name: Check committed artifacts

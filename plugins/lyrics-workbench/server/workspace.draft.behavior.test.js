@@ -4,8 +4,9 @@ import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_LYRIC_AI_CONFIG } from './policy.js';
 import { createLyricDraftReceipt } from './draftReceipt.js';
+import { testHostFile, testHostNodePaths } from '../../../tooling/test-host-root.mjs';
 
-const hostFile = path => fileURLToPath(new URL('../../../../server/server/src/' + path, import.meta.url)).replaceAll('\\', '/');
+const hostFile = testHostFile;
 // Parse, normalize, project and enforce byte limits with the real host code.
 // Only source/provider access and authorization plumbing are bounded fixtures.
 const capabilities = `
@@ -36,7 +37,7 @@ export const pluginFail = (code, status) => { throw Object.assign(new Error(code
 `;
 const bundled = await build({ stdin: { contents: `export * from './workspace.js'; export * from '@flaretune/plugin-sdk/server/lyric-workflow';
   export * from '@flaretune/plugin-sdk/server/lyric-assets';`, resolveDir: fileURLToPath(new URL('.', import.meta.url)) },
-  bundle: true, write: false, format: 'esm', platform: 'node',
+  bundle: true, write: false, format: 'esm', platform: 'node', nodePaths: testHostNodePaths,
   banner: { js: `import { createRequire } from 'node:module'; const require = createRequire(${JSON.stringify(import.meta.url)});` },
   plugins: [{ name: 'workspace-host-capabilities', setup(api) {
     api.onResolve({ filter: /^@flaretune\// }, args => ({ path: args.path, namespace: 'capabilities' }));

@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 import { completionCapabilities } from './translation.fixture.js';
+import { testHostFile } from '../../../tooling/test-host-root.mjs';
 
-const capabilities = completionCapabilities + `export { jsonTaskResponse } from ${JSON.stringify(fileURLToPath(new URL('../../../../server/server/src/services/jsonTaskResponse.js', import.meta.url)).replaceAll('\\', '/'))};\n` + String.raw`
+const capabilities = completionCapabilities + `export { jsonTaskResponse } from ${JSON.stringify(testHostFile('services/jsonTaskResponse.js'))};\n` + String.raw`
 export const LYRIC_TRANSLATION_POLICY_VERSION = 2;
 export class LyricSourceError extends Error {}
 export class LyricArtifactStoreError extends Error {}
